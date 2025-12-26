@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-from backend.app.core.tickers import ALL_TICKERS
+from backend.app.core.data_config import ALL_TICKERS
 from backend.app.core.timeframes import TIMEFRAME_COMBOS
 
 OUTPUT_COLUMNS = [
