@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   ColorType,
   LineSeries,
@@ -19,53 +19,46 @@ type Bar = {
   v: number;
 };
 
-const intervalOptions = [
-  { key: "ALL", seconds: null as number | null },
-  { key: "1D", seconds: 60 * 60 * 24 },
-  { key: "1W", seconds: 60 * 60 * 24 * 7 },
-  { key: "1M", seconds: 60 * 60 * 24 * 30 },
-  { key: "1Y", seconds: 60 * 60 * 24 * 365 },
+const palette = [
+  "#2962FF",
+  "rgb(225, 87, 90)",
+  "rgb(242, 142, 44)",
+  "rgb(164, 89, 209)",
 ];
 
-const intervalColors: Record<string, string> = {
-  ALL: "#0f172a",
-  "1D": "#2962FF",
-  "1W": "rgb(225, 87, 90)",
-  "1M": "rgb(242, 142, 44)",
-  "1Y": "rgb(164, 89, 209)",
+type RangeSwitcherChartProps = {
+  seriesByTimeframe: Record<string, Bar[]>;
+  timeframes: string[];
+  activeTimeframe: string;
+  onTimeframeChange: (timeframe: string) => void;
 };
 
-export default function RangeSwitcherChart({ bars }: { bars: Bar[] }) {
+export default function RangeSwitcherChart({
+  seriesByTimeframe,
+  timeframes,
+  activeTimeframe,
+  onTimeframeChange,
+}: RangeSwitcherChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const [activeInterval, setActiveInterval] = useState("ALL");
 
   const baseData = useMemo(() => {
+    const bars = seriesByTimeframe[activeTimeframe] ?? [];
     const sorted = [...bars].sort((a, b) => a.t - b.t);
     return sorted.map((bar) => ({
       time: bar.t as UTCTimestamp,
       value: bar.c,
     }));
-  }, [bars]);
+  }, [seriesByTimeframe, activeTimeframe]);
 
-  const seriesDataByInterval = useMemo(() => {
-    if (!baseData.length) {
-      return new Map<string, typeof baseData>();
-    }
-    const endTime = baseData[baseData.length - 1].time as number;
-    const map = new Map<string, typeof baseData>();
-    intervalOptions.forEach((interval) => {
-      if (!interval.seconds) {
-        map.set(interval.key, baseData);
-        return;
-      }
-      const startTime = endTime - interval.seconds;
-      const filtered = baseData.filter((point) => point.time >= startTime);
-      map.set(interval.key, filtered.length >= 2 ? filtered : baseData);
+  const colorByTimeframe = useMemo(() => {
+    const mapping: Record<string, string> = {};
+    timeframes.forEach((timeframe, index) => {
+      mapping[timeframe] = palette[index % palette.length];
     });
-    return map;
-  }, [baseData]);
+    return mapping;
+  }, [timeframes]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -89,7 +82,7 @@ export default function RangeSwitcherChart({ bars }: { bars: Bar[] }) {
     });
 
     const lineSeries = chart.addSeries(LineSeries, {
-      color: intervalColors[activeInterval] ?? "#2962FF",
+      color: colorByTimeframe[activeTimeframe] ?? palette[0],
       lineWidth: 2,
     });
 
@@ -114,35 +107,30 @@ export default function RangeSwitcherChart({ bars }: { bars: Bar[] }) {
   }, []);
 
   useEffect(() => {
-    setActiveInterval("ALL");
-  }, [bars]);
-
-  useEffect(() => {
     if (!lineSeriesRef.current || !chartRef.current) return;
-    const data = seriesDataByInterval.get(activeInterval) ?? baseData;
-    lineSeriesRef.current.setData(data);
+    lineSeriesRef.current.setData(baseData);
     lineSeriesRef.current.applyOptions({
-      color: intervalColors[activeInterval] ?? "#2962FF",
+      color: colorByTimeframe[activeTimeframe] ?? palette[0],
     });
     chartRef.current.timeScale().fitContent();
-  }, [activeInterval, baseData, seriesDataByInterval]);
+  }, [activeTimeframe, baseData, colorByTimeframe]);
 
   return (
     <div className="space-y-4">
       <div ref={containerRef} className="h-[320px] w-full" />
       <div className="flex flex-wrap gap-2">
-        {intervalOptions.map((interval) => (
+        {timeframes.map((timeframe) => (
           <button
-            key={interval.key}
+            key={timeframe}
             type="button"
-            onClick={() => setActiveInterval(interval.key)}
+            onClick={() => onTimeframeChange(timeframe)}
             className={`rounded-lg px-4 py-2 text-sm font-medium ${
-              activeInterval === interval.key
+              activeTimeframe === timeframe
                 ? "bg-slate-900 text-white"
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
           >
-            {interval.key}
+            {timeframe}
           </button>
         ))}
       </div>

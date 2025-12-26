@@ -6,6 +6,7 @@ import RangeSwitcherChart from "./RangeSwitcherChart";
 type OptionsResponse = {
   tickers: string[];
   timeframes: string[];
+  tickerInfo: Record<string, string>;
   dataset: {
     source: string;
     rowCount: number;
@@ -23,18 +24,10 @@ type Bar = {
   v: number;
 };
 
-type BarsResponse = {
-  ticker: string;
-  timeframe: string;
-  bars: Bar[];
-};
-
 type BarsBatchResponse = {
   timeframe: string;
   series: Record<string, Bar[]>;
 };
-
-const DEFAULT_LIMIT = 200;
 
 async function safeParseError(res: Response) {
   try {
@@ -54,14 +47,20 @@ function formatTimestamp(ts: number | null) {
   return date.toISOString().replace("T", " ").slice(0, 19);
 }
 
+function formatTickerLabel(ticker: string, info?: Record<string, string>) {
+  const name = info?.[ticker];
+  return name ? `${ticker} (${name})` : ticker;
+}
+
 export default function DisplayPage() {
   const [options, setOptions] = useState<OptionsResponse | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
-  const [selectedTimeframe, setSelectedTimeframe] = useState("");
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
-  const [barsByTicker, setBarsByTicker] = useState<Record<string, Bar[]>>({});
+  const [activeTimeframe, setActiveTimeframe] = useState("");
+  const [barsByTicker, setBarsByTicker] = useState<
+    Record<string, Record<string, Bar[]>>
+  >({});
   const [activeTicker, setActiveTicker] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +83,7 @@ export default function DisplayPage() {
           setActiveTicker(data.tickers[0]);
         }
         if (data.timeframes.length) {
-          setSelectedTimeframe(data.timeframes[0]);
+          setActiveTimeframe(data.timeframes[0]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "加载选项失败。");
@@ -99,7 +98,13 @@ export default function DisplayPage() {
     if (!options) return [];
     const query = search.trim().toLowerCase();
     if (!query) return options.tickers;
-    return options.tickers.filter((ticker) => ticker.toLowerCase().includes(query));
+    return options.tickers.filter((ticker) => {
+      const name = options.tickerInfo?.[ticker] ?? "";
+      return (
+        ticker.toLowerCase().includes(query) ||
+        name.toLowerCase().includes(query)
+      );
+    });
   }, [options, search]);
 
   const toggleTicker = (ticker: string) => {
@@ -119,48 +124,60 @@ export default function DisplayPage() {
   };
 
   const loadBars = async () => {
-    if (!selectedTimeframe || selectedTickers.length === 0) {
-      setError("请选择至少一个 ticker 和一个 timeframe。");
+    if (selectedTickers.length === 0) {
+      setError("请选择至少一个 ticker。");
       return;
     }
     setError(null);
     setLoading(true);
     try {
-      const effectiveLimit = limit > 0 ? limit : undefined;
-      if (selectedTickers.length === 1) {
-        const ticker = selectedTickers[0];
-        const res = await fetch(
-          `${apiBase}/api/bars?ticker=${encodeURIComponent(
-            ticker
-          )}&timeframe=${encodeURIComponent(selectedTimeframe)}${
-            effectiveLimit ? `&limit=${effectiveLimit}` : ""
-          }`,
-          { cache: "no-store" }
-        );
-        if (!res.ok) {
-          const detail = await safeParseError(res);
-          throw new Error(detail);
-        }
-        const data = (await res.json()) as BarsResponse;
-        setBarsByTicker({ [ticker]: data.bars });
-        setActiveTicker(ticker);
-      } else {
-        const res = await fetch(`${apiBase}/api/bars/batch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tickers: selectedTickers,
-            timeframe: selectedTimeframe,
-            limit: effectiveLimit,
-          }),
+      const refreshRes = await fetch(`${apiBase}/api/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!refreshRes.ok) {
+        const detail = await safeParseError(refreshRes);
+        throw new Error(detail);
+      }
+
+      if (!options) {
+        throw new Error("选项尚未加载完成。");
+      }
+
+      const timeframes = options.timeframes;
+      const responses = await Promise.all(
+        timeframes.map(async (timeframe) => {
+          const res = await fetch(`${apiBase}/api/bars/batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tickers: selectedTickers,
+              timeframe,
+            }),
+          });
+          if (!res.ok) {
+            const detail = await safeParseError(res);
+            throw new Error(detail);
+          }
+          const data = (await res.json()) as BarsBatchResponse;
+          return { timeframe: data.timeframe, series: data.series };
+        })
+      );
+
+      const nextBars: Record<string, Record<string, Bar[]>> = {};
+      responses.forEach(({ timeframe, series }) => {
+        Object.entries(series).forEach(([ticker, bars]) => {
+          if (!nextBars[ticker]) {
+            nextBars[ticker] = {};
+          }
+          nextBars[ticker][timeframe] = bars;
         });
-        if (!res.ok) {
-          const detail = await safeParseError(res);
-          throw new Error(detail);
-        }
-        const data = (await res.json()) as BarsBatchResponse;
-        setBarsByTicker(data.series);
-        setActiveTicker(selectedTickers[0]);
+      });
+
+      setBarsByTicker(nextBars);
+      setActiveTicker(selectedTickers[0]);
+      if (timeframes.length) {
+        setActiveTimeframe(timeframes[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "请求失败。");
@@ -169,7 +186,10 @@ export default function DisplayPage() {
     }
   };
 
-  const activeBars = activeTicker ? barsByTicker[activeTicker] || [] : [];
+  const activeBars =
+    activeTicker && activeTimeframe
+      ? barsByTicker[activeTicker]?.[activeTimeframe] || []
+      : [];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -208,7 +228,7 @@ export default function DisplayPage() {
                         onChange={() => toggleTicker(ticker)}
                         className="h-4 w-4 accent-slate-900"
                       />
-                      {ticker}
+                      <span>{formatTickerLabel(ticker, options.tickerInfo)}</span>
                     </label>
                   ))}
                   {!filteredTickers.length && (
@@ -246,38 +266,9 @@ export default function DisplayPage() {
           </div>
 
           <div className="mt-6">
-            <label className="text-sm font-medium text-slate-700">Timeframe</label>
-            <select
-              value={selectedTimeframe}
-              onChange={(event) => setSelectedTimeframe(event.target.value)}
-              disabled={!options || optionsLoading}
-              className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
-            >
-              {optionsLoading && <option>加载中...</option>}
-              {!optionsLoading && options?.timeframes.length === 0 && (
-                <option>无可用 timeframe</option>
-              )}
-              {!optionsLoading &&
-                options?.timeframes.map((timeframe) => (
-                  <option key={timeframe} value={timeframe}>
-                    {timeframe}
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          <div className="mt-6">
-            <label className="text-sm font-medium text-slate-700">最近 N 根</label>
-            <input
-              type="number"
-              min={0}
-              max={5000}
-              value={limit}
-              onChange={(event) => setLimit(Number(event.target.value))}
-              className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
-            />
+            <label className="text-sm font-medium text-slate-700">Timeframes</label>
             <p className="mt-2 text-xs text-slate-500">
-              设置为 0 则返回完整 timeframe。
+              由后端配置控制，点击 Load 会一次性拉取全部 timeframe 数据。
             </p>
           </div>
 
@@ -306,10 +297,10 @@ export default function DisplayPage() {
             <div>
               <h2 className="text-lg font-semibold">Charts</h2>
               <p className="text-xs text-slate-500">
-                {selectedTimeframe
-                  ? `Timeframe: ${selectedTimeframe}`
-                  : "请选择 timeframe"}
-              </p>
+            {activeTimeframe
+              ? `Timeframe: ${activeTimeframe}`
+              : "请选择 timeframe"}
+          </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {selectedTickers.map((ticker) => (
@@ -323,7 +314,7 @@ export default function DisplayPage() {
                       : "border-slate-200 text-slate-600 hover:border-slate-400"
                   }`}
                 >
-                  {ticker}
+                  {formatTickerLabel(ticker, options?.tickerInfo)}
                 </button>
               ))}
             </div>
@@ -332,7 +323,12 @@ export default function DisplayPage() {
           <div className="mt-6">
             {activeTicker ? (
               activeBars.length ? (
-                <RangeSwitcherChart bars={activeBars} />
+                <RangeSwitcherChart
+                  seriesByTimeframe={barsByTicker[activeTicker] || {}}
+                  timeframes={options?.timeframes || []}
+                  activeTimeframe={activeTimeframe}
+                  onTimeframeChange={setActiveTimeframe}
+                />
               ) : (
                 <div className="flex h-[320px] items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
                   暂无数据，点击 Load 拉取。
@@ -348,12 +344,18 @@ export default function DisplayPage() {
           {activeTicker && (
             <div className="mt-4 text-xs text-slate-500">
               {activeBars.length
-                ? `${activeTicker} 共 ${activeBars.length} 根K线，范围 ${formatTimestamp(
+                ? `${formatTickerLabel(
+                    activeTicker,
+                    options?.tickerInfo
+                  )} 共 ${activeBars.length} 根K线，范围 ${formatTimestamp(
                     activeBars[0]?.t ?? null
                   )} ~ ${formatTimestamp(
                     activeBars[activeBars.length - 1]?.t ?? null
                   )}`
-                : `${activeTicker} 在该 timeframe 下无数据`}
+                : `${formatTickerLabel(
+                    activeTicker,
+                    options?.tickerInfo
+                  )} 在该 timeframe 下无数据`}
             </div>
           )}
         </main>
