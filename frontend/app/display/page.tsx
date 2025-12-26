@@ -1,14 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  CandlestickSeries,
-  ColorType,
-  HistogramSeries,
-  createChart,
-  type IChartApi,
-  type ISeriesApi,
-} from "lightweight-charts";
+import { useEffect, useMemo, useState } from "react";
+import RangeSwitcherChart from "./RangeSwitcherChart";
 
 type OptionsResponse = {
   tickers: string[];
@@ -59,93 +52,6 @@ function formatTimestamp(ts: number | null) {
   if (!ts) return "-";
   const date = new Date(ts * 1000);
   return date.toISOString().replace("T", " ").slice(0, 19);
-}
-
-function ChartPanel({ bars }: { bars: Bar[] }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth || 600,
-      height: 420,
-      layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
-        textColor: "#0f172a",
-      },
-      rightPriceScale: {
-        borderColor: "#e2e8f0",
-      },
-      timeScale: {
-        borderColor: "#e2e8f0",
-      },
-      grid: {
-        horzLines: { color: "#f1f5f9" },
-        vertLines: { color: "#f1f5f9" },
-      },
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#16a34a",
-      downColor: "#ef4444",
-      borderUpColor: "#16a34a",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#16a34a",
-      wickDownColor: "#ef4444",
-    });
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      color: "#94a3b8",
-      priceScaleId: "volume",
-      priceFormat: {
-        type: "volume",
-      },
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0,
-      },
-    });
-
-    candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
-    chartRef.current = chart;
-
-    const resize = () => {
-      if (!containerRef.current) return;
-      chart.applyOptions({ width: containerRef.current.clientWidth, height: 420 });
-    };
-    resize();
-    window.addEventListener("resize", resize);
-
-    return () => {
-      window.removeEventListener("resize", resize);
-      chart.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-    const candleData = bars.map((bar) => ({
-      time: bar.t,
-      open: bar.o,
-      high: bar.h,
-      low: bar.l,
-      close: bar.c,
-    }));
-    const volumeData = bars.map((bar) => ({
-      time: bar.t,
-      value: bar.v,
-      color: bar.c >= bar.o ? "#22c55e" : "#f97316",
-    }));
-    candleSeriesRef.current.setData(candleData);
-    volumeSeriesRef.current.setData(volumeData);
-    chartRef.current?.timeScale().fitContent();
-  }, [bars]);
-
-  return <div ref={containerRef} className="h-[420px] w-full" />;
 }
 
 export default function DisplayPage() {
@@ -426,14 +332,14 @@ export default function DisplayPage() {
           <div className="mt-6">
             {activeTicker ? (
               activeBars.length ? (
-                <ChartPanel bars={activeBars} />
+                <RangeSwitcherChart bars={activeBars} />
               ) : (
-                <div className="flex h-[420px] items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
+                <div className="flex h-[320px] items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
                   暂无数据，点击 Load 拉取。
                 </div>
               )
             ) : (
-              <div className="flex h-[420px] items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
+              <div className="flex h-[320px] items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
                 请选择 ticker 进行查看。
               </div>
             )}
