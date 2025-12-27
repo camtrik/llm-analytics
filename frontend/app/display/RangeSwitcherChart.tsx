@@ -38,6 +38,22 @@ function formatTimeframeLabel(timeframe: string) {
   return parts[0] || timeframe;
 }
 
+function getIntervalToken(timeframe: string) {
+  const parts = timeframe.split("_");
+  return parts[1] || "";
+}
+
+function isIntradayInterval(interval: string) {
+  return interval.endsWith("m") || interval.endsWith("h");
+}
+
+function parsePeriod(timeframe: string) {
+  const prefix = timeframe.split("_")[0] || "";
+  const match = prefix.match(/^(\d+)([DMY])$/i);
+  if (!match) return null;
+  return { count: Number(match[1]), unit: match[2].toUpperCase() };
+}
+
 export default function RangeSwitcherChart({
   seriesByTimeframe,
   timeframes,
@@ -117,21 +133,34 @@ export default function RangeSwitcherChart({
     lineSeriesRef.current.applyOptions({
       color: colorByTimeframe[activeTimeframe] ?? palette[0],
     });
-    const isIntraday = activeTimeframe.includes("15m");
+    const interval = getIntervalToken(activeTimeframe);
+    const intraday = isIntradayInterval(interval);
+    const period = parsePeriod(activeTimeframe);
     chartRef.current.applyOptions({
       timeScale: {
-        timeVisible: isIntraday,
+        timeVisible: intraday,
         secondsVisible: false,
-        tickMarkFormatter: isIntraday
-          ? (time) => {
-              const ts = typeof time === "number" ? time : undefined;
-              if (!ts) return "";
-              return new Date(ts * 1000).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-            }
-          : undefined,
+        tickMarkFormatter: (time) => {
+          const ts = typeof time === "number" ? time : undefined;
+          if (!ts) return "";
+          const date = new Date(ts * 1000);
+          if (intraday && period && period.unit === "D" && period.count <= 1) {
+            return date.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+          }
+          if (period?.unit === "M" && period.count > 1) {
+            return date.toLocaleDateString([], {
+              year: "numeric",
+              month: "2-digit",
+            });
+          }
+          if (period?.unit === "Y") {
+            return date.toLocaleDateString([], { year: "numeric" });
+          }
+          return date.toLocaleDateString([], { month: "2-digit", day: "2-digit" });
+        },
       },
     });
     chartRef.current.timeScale().fitContent();
