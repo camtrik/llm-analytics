@@ -52,6 +52,16 @@ function formatTickerLabel(ticker: string, info?: Record<string, string>) {
   return name ? `${ticker} (${name})` : ticker;
 }
 
+function timeframeOrderValue(timeframe: string) {
+  const prefix = timeframe.split("_")[0] || timeframe;
+  const match = prefix.match(/^(\d+)([DMY])$/i);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  const count = Number(match[1]);
+  const unit = match[2].toUpperCase();
+  const multiplier = unit === "D" ? 1 : unit === "M" ? 30 : 365;
+  return count * multiplier;
+}
+
 export default function DisplayPage() {
   const [options, setOptions] = useState<OptionsResponse | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
@@ -83,7 +93,10 @@ export default function DisplayPage() {
           setActiveTicker(data.tickers[0]);
         }
         if (data.timeframes.length) {
-          setActiveTimeframe(data.timeframes[0]);
+          const sorted = [...data.timeframes].sort(
+            (a, b) => timeframeOrderValue(a) - timeframeOrderValue(b)
+          );
+          setActiveTimeframe(sorted[0]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "加载选项失败。");
@@ -106,6 +119,13 @@ export default function DisplayPage() {
       );
     });
   }, [options, search]);
+
+  const sortedTimeframes = useMemo(() => {
+    if (!options) return [];
+    return [...options.timeframes].sort(
+      (a, b) => timeframeOrderValue(a) - timeframeOrderValue(b)
+    );
+  }, [options]);
 
   const toggleTicker = (ticker: string) => {
     setSelectedTickers((prev) => {
@@ -163,7 +183,7 @@ export default function DisplayPage() {
         throw new Error("选项尚未加载完成。");
       }
 
-      const timeframes = options.timeframes;
+      const timeframes = sortedTimeframes;
       const responses = await Promise.all(
         timeframes.map(async (timeframe) => {
           const res = await fetch(`${apiBase}/api/bars/batch`, {
@@ -344,7 +364,7 @@ export default function DisplayPage() {
               activeBars.length ? (
                 <RangeSwitcherChart
                   seriesByTimeframe={barsByTicker[activeTicker] || {}}
-                  timeframes={options?.timeframes || []}
+                  timeframes={sortedTimeframes}
                   activeTimeframe={activeTimeframe}
                   onTimeframeChange={setActiveTimeframe}
                 />

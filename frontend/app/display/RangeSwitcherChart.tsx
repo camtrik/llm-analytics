@@ -33,6 +33,11 @@ type RangeSwitcherChartProps = {
   onTimeframeChange: (timeframe: string) => void;
 };
 
+function formatTimeframeLabel(timeframe: string) {
+  const parts = timeframe.split("_");
+  return parts[0] || timeframe;
+}
+
 export default function RangeSwitcherChart({
   seriesByTimeframe,
   timeframes,
@@ -147,7 +152,7 @@ export default function RangeSwitcherChart({
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
           >
-            {timeframe}
+            {formatTimeframeLabel(timeframe)}
           </button>
         ))}
       </div>
