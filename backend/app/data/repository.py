@@ -57,9 +57,17 @@ class BarsRepository:
                 details={"limit": limit},
             )
 
-    def _get_live_df(self, refresh: bool = False) -> pd.DataFrame:
+    def _get_live_df(
+        self, refresh: bool = False, tickers: list[str] | None = None
+    ) -> pd.DataFrame:
         try:
-            df = self._cache.get_df(refresh=refresh)
+            df = self._cache.get_df(refresh=refresh, tickers=tickers)
+        except RuntimeError as exc:
+            raise ApiError(
+                status_code=409,
+                error="data_not_ready",
+                message="Market data cache is empty. Call /api/refresh first.",
+            ) from exc
         except Exception as exc:
             raise ApiError(
                 status_code=500,
@@ -113,8 +121,8 @@ class BarsRepository:
             },
         }
 
-    def refresh_data(self) -> dict[str, int | None]:
-        df = self._get_live_df(refresh=True)
+    def refresh_data(self, tickers: list[str] | None = None) -> dict[str, int | None]:
+        df = self._get_live_df(refresh=True, tickers=tickers)
         return self._dataset_stats(df)
 
     def get_bars(self, ticker: str, timeframe: str, limit: int | None) -> dict[str, object]:

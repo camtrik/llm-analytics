@@ -134,11 +134,30 @@ export default function DisplayPage() {
       const refreshRes = await fetch(`${apiBase}/api/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers: selectedTickers }),
       });
       if (!refreshRes.ok) {
         const detail = await safeParseError(refreshRes);
         throw new Error(detail);
       }
+      const refreshStats = (await refreshRes.json()) as {
+        rowCount: number;
+        minDatetime: number | null;
+        maxDatetime: number | null;
+      };
+      setOptions((prev) =>
+        prev
+          ? {
+              ...prev,
+              dataset: {
+                ...prev.dataset,
+                rowCount: refreshStats.rowCount,
+                minDatetime: refreshStats.minDatetime,
+                maxDatetime: refreshStats.maxDatetime,
+              },
+            }
+          : prev
+      );
 
       if (!options) {
         throw new Error("选项尚未加载完成。");

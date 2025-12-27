@@ -11,14 +11,18 @@ class MarketDataCache:
         self._df: pd.DataFrame | None = None
         self._loaded_at: float | None = None
 
-    def refresh(self) -> pd.DataFrame:
-        self._df = download_all()
+    def refresh(self, tickers: list[str] | None = None) -> pd.DataFrame:
+        self._df = download_all(tickers=tickers)
         self._loaded_at = time.time()
         return self._df
 
-    def get_df(self, refresh: bool = False) -> pd.DataFrame:
-        if refresh or self._df is None:
-            return self.refresh()
+    def get_df(
+        self, refresh: bool = False, tickers: list[str] | None = None
+    ) -> pd.DataFrame:
+        if refresh:
+            return self.refresh(tickers=tickers)
+        if self._df is None:
+            raise RuntimeError("market data cache is empty")
         return self._df
 
     def snapshot(self) -> pd.DataFrame | None:

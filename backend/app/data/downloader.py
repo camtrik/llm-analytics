@@ -46,11 +46,15 @@ def _reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df[ordered + remaining]
 
 
-def download_all() -> pd.DataFrame:
+def download_all(
+    tickers: list[str] | None = None, timeframes=None
+) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
-    for timeframe in TIMEFRAME_COMBOS:
+    tickers = tickers or ALL_TICKERS
+    timeframes = timeframes or TIMEFRAME_COMBOS
+    for timeframe in timeframes:
         df = yf.download(
-            tickers=ALL_TICKERS,
+            tickers=tickers,
             period=timeframe.period,
             interval=timeframe.interval,
             group_by="ticker",

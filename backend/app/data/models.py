@@ -43,6 +43,10 @@ class BarsBatchResponse(BaseModel):
     series: dict[str, list[Bar]]
 
 
+class RefreshRequest(BaseModel):
+    tickers: list[str] | None = None
+
+
 class RefreshResponse(BaseModel):
     rowCount: int
     minDatetime: int | None
