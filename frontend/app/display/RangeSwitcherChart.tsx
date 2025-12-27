@@ -112,6 +112,23 @@ export default function RangeSwitcherChart({
     lineSeriesRef.current.applyOptions({
       color: colorByTimeframe[activeTimeframe] ?? palette[0],
     });
+    const isIntraday = activeTimeframe.includes("15m");
+    chartRef.current.applyOptions({
+      timeScale: {
+        timeVisible: isIntraday,
+        secondsVisible: false,
+        tickMarkFormatter: isIntraday
+          ? (time) => {
+              const ts = typeof time === "number" ? time : undefined;
+              if (!ts) return "";
+              return new Date(ts * 1000).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+            }
+          : undefined,
+      },
+    });
     chartRef.current.timeScale().fitContent();
   }, [activeTimeframe, baseData, colorByTimeframe]);
 
