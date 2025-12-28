@@ -4,9 +4,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.data.models import Bar
 from app.portfolio.models import Position
 
 
+# API DTOs (Pydantic): used for request/response validation at the analysis API boundary.
 class FeedBar(BaseModel):
     time: str
     o: float
@@ -41,3 +43,7 @@ class FeedResponse(BaseModel):
     tradableTickers: list[str]
     ohlcv: dict[str, dict[str, list[FeedBar]]]
     meta: FeedMeta
+
+
+# Internal helper types (not exposed as API DTOs).
+OhlcvByTimeframe = dict[str, dict[str, list[Bar]]]

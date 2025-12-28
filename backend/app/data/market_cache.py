@@ -11,12 +11,22 @@ import pandas as pd
 from app.core.errors import ApiError
 from app.core.timeframes import TIMEFRAME_TTL_SECONDS, Timeframe
 from app.data.downloader import download_timeframe
+from app.data.models import Bar, BarSummary, CachePayload, ManifestPayload
 
 
 @dataclass
 class RefreshFailure:
     ticker: str
     reason: str
+
+
+@dataclass(frozen=True)
+class TickerTimeframe:
+    ticker: str
+    timeframe: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"ticker": self.ticker, "timeframe": self.timeframe}
 
 
 class MarketCache:
@@ -38,8 +48,8 @@ class MarketCache:
                     succeeded.append(ticker)
                     continue
 
-                bars_by_timeframe: dict[str, list[dict[str, object]]] = {}
-                meta_by_timeframe: dict[str, dict[str, int | None]] = {}
+                bars_by_timeframe: dict[str, list[Bar]] = {}
+                meta_by_timeframe: dict[str, BarSummary] = {}
                 for timeframe in self._timeframes.values():
                     df = download_timeframe([ticker], timeframe)
                     bars_map = _df_to_bars(df)
@@ -75,13 +85,13 @@ class MarketCache:
 
         return succeeded, failed
 
-    def get_bars(self, ticker: str, timeframe: str) -> list[dict[str, object]]:
+    def get_bars(self, ticker: str, timeframe: str) -> list[Bar]:
         bars_map = self.get_bars_batch([ticker], timeframe)
         return bars_map.get(ticker, [])
 
     def get_bars_batch(
         self, tickers: list[str], timeframe: str
-    ) -> dict[str, list[dict[str, object]]]:
+    ) -> dict[str, list[Bar]]:
         manifest = self._load_manifest()
         missing, stale = self._validate_manifest(manifest, tickers, [timeframe])
         if missing or stale:
@@ -89,10 +99,13 @@ class MarketCache:
                 status_code=409,
                 error="cache_not_ready",
                 message="Market cache is not ready. Call /api/refresh first.",
-                details={"missing": missing, "stale": stale},
+                details={
+                    "missing": [issue.as_dict() for issue in missing],
+                    "stale": [issue.as_dict() for issue in stale],
+                },
             )
 
-        results: dict[str, list[dict[str, object]]] = {}
+        results: dict[str, list[Bar]] = {}
         for ticker in tickers:
             path = self._file_path(timeframe, ticker)
             payload = self._read_json(path)
@@ -106,13 +119,13 @@ class MarketCache:
             results[ticker] = _normalize_bars(payload.get("bars", []))
         return results
 
-    def get_manifest(self) -> dict[str, Any]:
+    def get_manifest(self) -> ManifestPayload:
         return self._load_manifest()
 
     def _file_path(self, timeframe: str, ticker: str) -> Path:
         return self._base_dir / timeframe / f"{ticker}.json"
 
-    def _load_manifest(self) -> dict[str, Any]:
+    def _load_manifest(self) -> ManifestPayload:
         manifest = self._read_json(self._manifest_path)
         if not isinstance(manifest, dict):
             return {"generatedAt": None, "entries": {}}
@@ -121,10 +134,10 @@ class MarketCache:
         return manifest
 
     def _validate_manifest(
-        self, manifest: dict[str, Any], tickers: list[str], timeframes: list[str]
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-        missing: list[dict[str, str]] = []
-        stale: list[dict[str, str]] = []
+        self, manifest: ManifestPayload, tickers: list[str], timeframes: list[str]
+    ) -> tuple[list[TickerTimeframe], list[TickerTimeframe]]:
+        missing: list[TickerTimeframe] = []
+        stale: list[TickerTimeframe] = []
         entries = manifest.get("entries", {})
         now = int(datetime.now(timezone.utc).timestamp())
 
@@ -132,7 +145,7 @@ class MarketCache:
             entry = entries.get(ticker)
             if not isinstance(entry, dict):
                 for timeframe in timeframes:
-                    missing.append({"ticker": ticker, "timeframe": timeframe})
+                    missing.append(TickerTimeframe(ticker=ticker, timeframe=timeframe))
                 continue
 
             fetched_at = entry.get("fetchedAt")
@@ -147,18 +160,18 @@ class MarketCache:
             for timeframe in timeframes:
                 tf_entry = entry.get(timeframe)
                 if not isinstance(tf_entry, dict):
-                    missing.append({"ticker": ticker, "timeframe": timeframe})
+                    missing.append(TickerTimeframe(ticker=ticker, timeframe=timeframe))
                     continue
                 ttl_seconds = TIMEFRAME_TTL_SECONDS.get(timeframe, 0)
                 if fetched_ts is None:
-                    stale.append({"ticker": ticker, "timeframe": timeframe})
+                    stale.append(TickerTimeframe(ticker=ticker, timeframe=timeframe))
                     continue
                 if ttl_seconds and now - fetched_ts > ttl_seconds:
-                    stale.append({"ticker": ticker, "timeframe": timeframe})
+                    stale.append(TickerTimeframe(ticker=ticker, timeframe=timeframe))
                     continue
                 path = self._file_path(timeframe, ticker)
                 if not path.exists():
-                    missing.append({"ticker": ticker, "timeframe": timeframe})
+                    missing.append(TickerTimeframe(ticker=ticker, timeframe=timeframe))
 
         return missing, stale
 
@@ -178,14 +191,14 @@ class MarketCache:
         tmp_path.replace(path)
 
 
-def _df_to_bars(df: pd.DataFrame) -> dict[str, list[dict[str, object]]]:
+def _df_to_bars(df: pd.DataFrame) -> dict[str, list[Bar]]:
     if df.empty:
         return {}
     df = _ensure_timestamp(df)
-    results: dict[str, list[dict[str, object]]] = {}
+    results: dict[str, list[Bar]] = {}
     for ticker, group in df.groupby("Ticker"):
         group = group.sort_values("ts").drop_duplicates(subset="ts", keep="last")
-        bars: list[dict[str, object]] = []
+        bars: list[Bar] = []
         for row in group.itertuples(index=False):
             ts = getattr(row, "ts", None)
             if pd.isna(ts):
@@ -225,7 +238,7 @@ def _ensure_timestamp(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _summarize_bars(bars: list[dict[str, object]]) -> dict[str, int | None]:
+def _summarize_bars(bars: list[Bar]) -> BarSummary:
     timestamps = []
     for bar in bars:
         ts = _extract_ts(bar)
@@ -237,8 +250,8 @@ def _summarize_bars(bars: list[dict[str, object]]) -> dict[str, int | None]:
 
 
 def _build_cache_payload(
-    ticker: str, timeframe: Timeframe, bars: Iterable[dict[str, object]]
-) -> dict[str, object]:
+    ticker: str, timeframe: Timeframe, bars: Iterable[Bar]
+) -> CachePayload:
     timestamps = []
     for bar in bars:
         ts = _extract_ts(bar)
@@ -273,7 +286,7 @@ def _build_cache_payload(
     }
 
 
-def _extract_ts(bar: dict[str, object]) -> int | None:
+def _extract_ts(bar: Bar) -> int | None:
     ts = bar.get("t")
     if isinstance(ts, (int, float)):
         return int(ts)
@@ -287,8 +300,8 @@ def _extract_ts(bar: dict[str, object]) -> int | None:
     return None
 
 
-def _normalize_bars(bars: list[dict[str, object]]) -> list[dict[str, object]]:
-    normalized: list[dict[str, object]] = []
+def _normalize_bars(bars: list[Bar]) -> list[Bar]:
+    normalized: list[Bar] = []
     for bar in bars:
         if not isinstance(bar, dict):
             continue

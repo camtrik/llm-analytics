@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+# API DTOs (Pydantic): used for portfolio endpoints and storage serialization.
 class Position(BaseModel):
     ticker: str
     qty: float = Field(..., description="Position size")

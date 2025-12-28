@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.analysis.models import FeedMeta, FeedResponse, TimeframeMeta
+from app.analysis.models import FeedMeta, FeedResponse, OhlcvByTimeframe, TimeframeMeta
 from app.core.config import load_settings
 from app.core.data_config import ALL_TICKERS
 from app.core.errors import ApiError
 from app.core.timeframes import FEED_TIMEFRAMES, TIMEFRAME_COMBOS, Timeframe
 from app.data.market_cache import MarketCache
+from app.data.models import Bar
 from app.portfolio.store import get_portfolio_store
 
 
@@ -26,7 +27,7 @@ def build_feed(
     tickers = _resolve_tickers(tradable_tickers, settings.feed_max_tickers)
     timeframe_map = {tf.name: tf for tf in TIMEFRAME_COMBOS}
     cache = MarketCache(settings.runtime_dir / "market_cache", TIMEFRAME_COMBOS)
-    ohlcv: dict[str, dict[str, list[dict[str, object]]]] = {}
+    ohlcv: OhlcvByTimeframe = {}
     timeframe_meta: dict[str, TimeframeMeta] = {}
 
     for timeframe_name in FEED_TIMEFRAMES:
@@ -91,9 +92,7 @@ def _load_timeframe_bars(
     return cache.get_bars_batch(tickers, timeframe.name)
 
 
-def _summarize_timeframe(
-    bars_map: dict[str, list[dict[str, object]]]
-) -> TimeframeMeta:
+def _summarize_timeframe(bars_map: dict[str, list[Bar]]) -> TimeframeMeta:
     timestamps: list[int] = []
     for bars in bars_map.values():
         for bar in bars:
@@ -109,7 +108,7 @@ def _summarize_timeframe(
     )
 
 
-def _extract_ts(bar: dict[str, object]) -> int | None:
+def _extract_ts(bar: Bar) -> int | None:
     ts = bar.get("t")
     if isinstance(ts, (int, float)):
         return int(ts)

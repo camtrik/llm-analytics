@@ -7,6 +7,13 @@ from app.core.data_config import ALL_TICKERS, TIMEFRAME_COMBOS, TICKER_LABELS
 from app.core.errors import ApiError
 from app.core.timeframes import Timeframe
 from app.data.market_cache import MarketCache
+from app.data.models import (
+    BarsBatchResponse,
+    BarsResponse,
+    OptionsResponse,
+    RefreshFailure as RefreshFailureModel,
+    RefreshResponse,
+)
 
 
 class BarsRepository:
@@ -42,29 +49,29 @@ class BarsRepository:
                 details={"limit": limit, "maxLimit": self._max_limit},
             )
 
-    def list_options(self) -> dict[str, object]:
+    def list_options(self) -> OptionsResponse:
         tickers = sorted(self._tickers)
         timeframes = sorted([tf.name for tf in self._timeframes])
 
-        return {
-            "tickers": tickers,
-            "timeframes": timeframes,
-            "tickerInfo": dict(self._ticker_labels),
-        }
+        return OptionsResponse(
+            tickers=tickers,
+            timeframes=timeframes,
+            tickerInfo=dict(self._ticker_labels),
+        )
 
-    def refresh_data(self, tickers: list[str]) -> dict[str, object]:
+    def refresh_data(self, tickers: list[str]) -> RefreshResponse:
         requested = list(tickers)
         succeeded, failed = self._cache.refresh(requested)
-        return {
-            "requested": requested,
-            "succeeded": succeeded,
-            "failed": [
-                {"ticker": failure.ticker, "reason": failure.reason}
+        return RefreshResponse(
+            requested=requested,
+            succeeded=succeeded,
+            failed=[
+                RefreshFailureModel(ticker=failure.ticker, reason=failure.reason)
                 for failure in failed
             ],
-        }
+        )
 
-    def get_bars(self, ticker: str, timeframe: str, limit: int | None) -> dict[str, object]:
+    def get_bars(self, ticker: str, timeframe: str, limit: int | None) -> BarsResponse:
         self._validate_limit(limit)
         if timeframe not in {tf.name for tf in self._timeframes}:
             raise ApiError(
@@ -84,11 +91,11 @@ class BarsRepository:
         bars = self._cache.get_bars(ticker, timeframe)
         if limit is not None:
             bars = bars[-limit:]
-        return {"ticker": ticker, "timeframe": timeframe, "bars": bars}
+        return BarsResponse(ticker=ticker, timeframe=timeframe, bars=bars)
 
     def get_bars_batch(
         self, tickers: Iterable[str], timeframe: str, limit: int | None
-    ) -> dict[str, object]:
+    ) -> BarsBatchResponse:
         self._validate_limit(limit)
         if timeframe not in {tf.name for tf in self._timeframes}:
             raise ApiError(
@@ -110,7 +117,7 @@ class BarsRepository:
         series = self._cache.get_bars_batch(tickers_list, timeframe)
         if limit is not None:
             series = {ticker: bars[-limit:] for ticker, bars in series.items()}
-        return {"timeframe": timeframe, "series": series}
+        return BarsBatchResponse(timeframe=timeframe, series=series)
 
 
 _settings = load_settings()
