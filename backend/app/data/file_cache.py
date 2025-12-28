@@ -21,14 +21,17 @@ class JsonFileCache:
             age = time.time() - path.stat().st_mtime
             if age > ttl_seconds:
                 return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
 
     def save(self, timeframe: str, ticker: str, payload: dict[str, Any]) -> None:
         path = self._path_for(timeframe, ticker)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(".tmp")
         tmp_path.write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         tmp_path.replace(path)

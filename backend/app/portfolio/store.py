@@ -16,7 +16,10 @@ class PortfolioStore:
     def load(self) -> Portfolio:
         if not self._path.exists():
             return Portfolio(positions=[], source=None, importedAt=None)
-        data = json.loads(self._path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return Portfolio(positions=[], source=None, importedAt=None)
         if hasattr(Portfolio, "model_validate"):
             return Portfolio.model_validate(data)
         return Portfolio.parse_obj(data)
@@ -26,7 +29,7 @@ class PortfolioStore:
         payload = jsonable_encoder(portfolio)
         tmp_path = self._path.with_suffix(".tmp")
         tmp_path.write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         tmp_path.replace(self._path)
