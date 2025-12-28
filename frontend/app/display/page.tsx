@@ -9,15 +9,10 @@ type OptionsResponse = {
   tickers: string[];
   timeframes: string[];
   tickerInfo: Record<string, string>;
-  dataset: {
-    source: string;
-    rowCount: number;
-    minDatetime: number | null;
-    maxDatetime: number | null;
-  };
 };
 
 type Bar = {
+  time?: string;
   t: number;
   o: number;
   h: number;
@@ -134,6 +129,7 @@ export default function DisplayPage() {
   const [feed, setFeed] = useState<FeedResponse | null>(null);
   const [feedLoading, setFeedLoading] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [cacheReady, setCacheReady] = useState(false);
 
   const apiBase =
     process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
@@ -166,6 +162,10 @@ export default function DisplayPage() {
     };
     fetchOptions();
   }, [apiBase]);
+
+  useEffect(() => {
+    setCacheReady(false);
+  }, [selectedTickers]);
 
   const filteredTickers = useMemo(() => {
     if (!options) return [];
@@ -210,6 +210,7 @@ export default function DisplayPage() {
     }
     setError(null);
     setLoading(true);
+    setCacheReady(false);
     try {
       const refreshRes = await fetch(`${apiBase}/api/refresh`, {
         method: "POST",
@@ -220,24 +221,15 @@ export default function DisplayPage() {
         const detail = await safeParseError(refreshRes);
         throw new Error(detail);
       }
-      const refreshStats = (await refreshRes.json()) as {
-        rowCount: number;
-        minDatetime: number | null;
-        maxDatetime: number | null;
+      const refreshPayload = (await refreshRes.json()) as {
+        requested: string[];
+        succeeded: string[];
+        failed: { ticker: string; reason: string }[];
       };
-      setOptions((prev) =>
-        prev
-          ? {
-              ...prev,
-              dataset: {
-                ...prev.dataset,
-                rowCount: refreshStats.rowCount,
-                minDatetime: refreshStats.minDatetime,
-                maxDatetime: refreshStats.maxDatetime,
-              },
-            }
-          : prev
-      );
+      if (refreshPayload.failed.length) {
+        const failedTickers = refreshPayload.failed.map((item) => item.ticker);
+        throw new Error(`以下 ticker 拉取失败：${failedTickers.join(", ")}`);
+      }
 
       if (!options) {
         throw new Error("选项尚未加载完成。");
@@ -278,6 +270,7 @@ export default function DisplayPage() {
       if (timeframes.length) {
         setActiveTimeframe(timeframes[0]);
       }
+      setCacheReady(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "请求失败。");
     } finally {
@@ -479,13 +472,6 @@ export default function DisplayPage() {
             )}
           </div>
 
-          {options && (
-            <div className="mt-6 text-xs text-slate-400">
-              <div>Rows: {options.dataset.rowCount}</div>
-              <div>Min: {formatTimestamp(options.dataset.minDatetime)}</div>
-              <div>Max: {formatTimestamp(options.dataset.maxDatetime)}</div>
-            </div>
-          )}
         </aside>
 
         <main className="flex-1 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -566,7 +552,7 @@ export default function DisplayPage() {
               <button
                 type="button"
                 onClick={loadFeed}
-                disabled={feedLoading}
+                disabled={feedLoading || !cacheReady}
                 className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {feedLoading ? "生成中..." : "生成 Feed"}
@@ -577,7 +563,9 @@ export default function DisplayPage() {
 
             {!feed && !feedLoading && (
               <div className="mt-4 text-xs text-slate-500">
-                选择 ticker 后点击“生成 Feed”预览输入。
+                {cacheReady
+                  ? "选择 ticker 后点击“生成 Feed”预览输入。"
+                  : "请先点击 Load 完成缓存。"}
               </div>
             )}
 

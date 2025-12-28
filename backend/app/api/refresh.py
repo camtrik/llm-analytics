@@ -12,5 +12,4 @@ router = APIRouter()
 @router.post("/refresh", response_model=RefreshResponse)
 def refresh_data(payload: RefreshRequest) -> RefreshResponse:
     repository = get_repository()
-    tickers = payload.tickers or None
-    return repository.refresh_data(tickers=tickers)
+    return repository.refresh_data(tickers=payload.tickers)

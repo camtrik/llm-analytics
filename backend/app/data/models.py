@@ -3,21 +3,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
-class OptionsDataset(BaseModel):
-    source: str
-    rowCount: int
-    minDatetime: int | None
-    maxDatetime: int | None
-
-
 class OptionsResponse(BaseModel):
     tickers: list[str]
     timeframes: list[str]
     tickerInfo: dict[str, str]
-    dataset: OptionsDataset
 
 
 class Bar(BaseModel):
+    time: str | None = None
     t: int
     o: float
     h: float
@@ -44,10 +37,15 @@ class BarsBatchResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    tickers: list[str] | None = None
+    tickers: list[str]
+
+
+class RefreshFailure(BaseModel):
+    ticker: str
+    reason: str
 
 
 class RefreshResponse(BaseModel):
-    rowCount: int
-    minDatetime: int | None
-    maxDatetime: int | None
+    requested: list[str]
+    succeeded: list[str]
+    failed: list[RefreshFailure]
