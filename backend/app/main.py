@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router as api_router
 from app.config.settings import load_settings
-from app.core.errors import ApiError, api_error_handler
+from app.errors import ApiError, api_error_handler
 
 
 settings = load_settings()

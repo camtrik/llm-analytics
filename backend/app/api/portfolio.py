@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, UploadFile
 
-from app.core.errors import ApiError
+from app.errors import ApiError
 from app.portfolio.models import ImportResult, Portfolio
 from app.portfolio.sbi_csv import parse_sbi_positions
 from app.portfolio.store import get_portfolio_store

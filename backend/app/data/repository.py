@@ -4,7 +4,7 @@ from typing import Iterable
 
 from app.config.settings import load_settings
 from app.config.data_config import ALL_TICKERS, TIMEFRAME_COMBOS, TICKER_LABELS
-from app.core.errors import ApiError
+from app.errors import ApiError
 from app.config.timeframes import Timeframe
 from app.data.market_cache import MarketCache
 from app.data.models import (
