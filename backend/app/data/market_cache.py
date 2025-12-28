@@ -9,7 +9,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from app.core.errors import ApiError
-from app.core.timeframes import TIMEFRAME_TTL_SECONDS, Timeframe
+from app.config.timeframes import TIMEFRAME_TTL_SECONDS, Timeframe
 from app.data.downloader import download_timeframe
 from app.data.models import Bar, BarSummary, CachePayload, ManifestPayload
 

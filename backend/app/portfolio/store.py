@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.encoders import jsonable_encoder
 
-from app.core.config import load_settings
+from app.config.settings import load_settings
 from app.portfolio.models import Portfolio
 
 

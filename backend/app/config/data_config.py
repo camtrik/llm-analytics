@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from app.core.timeframes import TIMEFRAME_COMBOS
+from app.config.timeframes import TIMEFRAME_COMBOS
 
 
 def _load_tickers() -> dict[str, str]:

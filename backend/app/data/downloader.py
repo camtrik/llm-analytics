@@ -3,8 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import yfinance as yf
 
-from app.core.data_config import ALL_TICKERS, TIMEFRAME_COMBOS
-from app.core.timeframes import Timeframe
+from app.config.data_config import ALL_TICKERS, TIMEFRAME_COMBOS
+from app.config.timeframes import Timeframe
 
 
 OUTPUT_COLUMNS = [
