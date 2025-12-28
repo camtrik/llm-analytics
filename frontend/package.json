@@ -9,10 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@babel/runtime": "^7.28.4",
+    "@uiw/react-json-view": "^2.0.0-alpha.40",
+    "lightweight-charts": "^5.0.7",
     "next": "16.1.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "lightweight-charts": "^5.0.7"
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -4,6 +4,7 @@ import pandas as pd
 import yfinance as yf
 
 from app.core.data_config import ALL_TICKERS, TIMEFRAME_COMBOS
+from app.core.timeframes import Timeframe
 
 
 OUTPUT_COLUMNS = [
@@ -63,7 +64,7 @@ def download_all(
             progress=False,
             threads=True,
         )
-        df = _normalize_download(df, ALL_TICKERS)
+        df = _normalize_download(df, tickers)
         if df.empty:
             continue
         df["Timeframe"] = timeframe.name
@@ -76,3 +77,25 @@ def download_all(
 
     combined = pd.concat(frames, ignore_index=True)
     return _reorder_columns(combined)
+
+
+def download_timeframe(tickers: list[str], timeframe: Timeframe) -> pd.DataFrame:
+    if not tickers:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+    df = yf.download(
+        tickers=tickers,
+        period=timeframe.period,
+        interval=timeframe.interval,
+        group_by="ticker",
+        auto_adjust=False,
+        actions=False,
+        progress=False,
+        threads=True,
+    )
+    df = _normalize_download(df, tickers)
+    if df.empty:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+    df["Timeframe"] = timeframe.name
+    df["Period"] = timeframe.period
+    df["Interval"] = timeframe.interval
+    return _reorder_columns(df)

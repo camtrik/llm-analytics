@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import RangeSwitcherChart from "./RangeSwitcherChart";
+import JsonView from "@uiw/react-json-view";
+import { githubLightTheme } from "@uiw/react-json-view/githubLight";
 
 type OptionsResponse = {
   tickers: string[];
@@ -29,6 +31,50 @@ type BarsBatchResponse = {
   series: Record<string, Bar[]>;
 };
 
+type FeedBar = {
+  time: string;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+};
+
+type Position = {
+  ticker: string;
+  qty: number;
+  avg_cost?: number | null;
+  currency?: string | null;
+  market?: string | null;
+  name?: string | null;
+};
+
+type ImportResult = {
+  positions: Position[];
+  importedAt: string;
+  skipped: number;
+};
+
+type FeedResponse = {
+  date: string;
+  positions: Position[];
+  tradableTickers: string[];
+  ohlcv: Record<string, Record<string, FeedBar[]>>;
+  meta: {
+    source: string;
+    generatedAt: string;
+    version: string;
+    timeframes: Record<
+      string,
+      {
+        minTs: number | null;
+        maxTs: number | null;
+        barCount: number;
+      }
+    >;
+  };
+};
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -44,6 +90,13 @@ async function safeParseError(res: Response) {
 function formatTimestamp(ts: number | null) {
   if (!ts) return "-";
   const date = new Date(ts * 1000);
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
+function formatIsoDatetime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
   return date.toISOString().replace("T", " ").slice(0, 19);
 }
 
@@ -74,6 +127,13 @@ export default function DisplayPage() {
   const [activeTicker, setActiveTicker] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [feed, setFeed] = useState<FeedResponse | null>(null);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedError, setFeedError] = useState<string | null>(null);
 
   const apiBase =
     process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
@@ -225,6 +285,66 @@ export default function DisplayPage() {
     }
   };
 
+  const importSbi = async () => {
+    if (!importFile) {
+      setImportError("请选择需要导入的 CSV 文件。");
+      return;
+    }
+    setImportError(null);
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const res = await fetch(`${apiBase}/api/portfolio/import/sbi`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as ImportResult;
+      setImportResult(data);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "导入失败。");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const loadFeed = async () => {
+    if (!selectedTickers.length) {
+      setFeedError("请选择至少一个 ticker。");
+      return;
+    }
+    setFeedError(null);
+    setFeedLoading(true);
+    try {
+      const payload: {
+        includePositions: boolean;
+        tradableTickers: string[];
+      } = {
+        includePositions: true,
+        tradableTickers: selectedTickers,
+      };
+      const res = await fetch(`${apiBase}/api/analysis/feed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as FeedResponse;
+      setFeed(data);
+    } catch (err) {
+      setFeedError(err instanceof Error ? err.message : "请求失败。");
+    } finally {
+      setFeedLoading(false);
+    }
+  };
+
   const activeBars =
     activeTicker && activeTimeframe
       ? barsByTicker[activeTicker]?.[activeTimeframe] || []
@@ -322,6 +442,43 @@ export default function DisplayPage() {
 
           {error && <p className="mt-4 text-xs text-rose-500">{error}</p>}
 
+          <div className="mt-6">
+            <label className="text-sm font-medium text-slate-700">
+              SBI 持仓导入
+            </label>
+            <p className="mt-2 text-xs text-slate-500">
+              上传从 SBI 证券导出的 CSV 持仓文件。
+            </p>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={(event) => {
+                setImportFile(event.target.files?.[0] ?? null);
+                setImportResult(null);
+                setImportError(null);
+              }}
+              className="mt-2 w-full text-xs text-slate-600"
+            />
+            <button
+              type="button"
+              onClick={importSbi}
+              disabled={!importFile || importing}
+              className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {importing ? "导入中..." : "导入 CSV"}
+            </button>
+            {importError && (
+              <p className="mt-2 text-xs text-rose-500">{importError}</p>
+            )}
+            {importResult && (
+              <div className="mt-2 text-xs text-slate-500">
+                <div>已导入 {importResult.positions.length} 条持仓</div>
+                <div>跳过 {importResult.skipped} 条</div>
+                <div>时间 {formatIsoDatetime(importResult.importedAt)}</div>
+              </div>
+            )}
+          </div>
+
           {options && (
             <div className="mt-6 text-xs text-slate-400">
               <div>Rows: {options.dataset.rowCount}</div>
@@ -397,6 +554,47 @@ export default function DisplayPage() {
                   )} 在该 timeframe 下无数据`}
             </div>
           )}
+
+          <section className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">Feed Preview</h3>
+                <p className="text-xs text-slate-500">
+                  查看喂给模型的结构化输入，包含持仓与两套时间尺度。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadFeed}
+                disabled={feedLoading}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {feedLoading ? "生成中..." : "生成 Feed"}
+              </button>
+            </div>
+
+            {feedError && <p className="mt-3 text-xs text-rose-500">{feedError}</p>}
+
+            {!feed && !feedLoading && (
+              <div className="mt-4 text-xs text-slate-500">
+                选择 ticker 后点击“生成 Feed”预览输入。
+              </div>
+            )}
+
+            {feed && (
+              <div className="mt-4 max-h-[520px] overflow-auto rounded-xl border border-slate-200 bg-white p-3">
+                <JsonView
+                  value={feed}
+                  collapsed={2}
+                  displayDataTypes={false}
+                  displayObjectSize={false}
+                  enableClipboard={true}
+                  keyName="feed"
+                  style={githubLightTheme}
+                />
+              </div>
+            )}
+          </section>
         </main>
       </div>
     </div>
