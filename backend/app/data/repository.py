@@ -56,6 +56,13 @@ class BarsRepository:
                 message="limit must be greater than 0.",
                 details={"limit": limit},
             )
+        if limit > self._max_limit:
+            raise ApiError(
+                status_code=400,
+                error="invalid_request",
+                message="limit exceeds maximum.",
+                details={"limit": limit, "maxLimit": self._max_limit},
+            )
 
     def _get_live_df(
         self, refresh: bool = False, tickers: list[str] | None = None
@@ -85,13 +92,6 @@ class BarsRepository:
             "minDatetime": min_ts,
             "maxDatetime": max_ts,
         }
-        if limit > self._max_limit:
-            raise ApiError(
-                status_code=400,
-                error="invalid_request",
-                message="limit exceeds maximum.",
-                details={"limit": limit, "maxLimit": self._max_limit},
-            )
 
     def list_options(self) -> dict[str, object]:
         df = self._cache.snapshot()
