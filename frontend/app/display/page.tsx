@@ -113,6 +113,34 @@ type AnalysisRunResponse = {
   raw?: string | null;
 };
 
+type AnalysisRecordResponse = {
+  id: number;
+  createdAt: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  status: string;
+  error?: string | null;
+  result?: AnalysisResult | null;
+  raw?: string | null;
+};
+
+type AnalysisHistoryItem = {
+  id: number;
+  createdAt: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  tickers: string[];
+  summary?: string | null;
+  status: string;
+  error?: string | null;
+};
+
+type AnalysisHistoryResponse = {
+  items: AnalysisHistoryItem[];
+};
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -199,6 +227,10 @@ export default function DisplayPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [cashInput, setCashInput] = useState<string>("1000000");
+  const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [analysisView, setAnalysisView] = useState<"result" | "history">("result");
   const [cacheReady, setCacheReady] = useState(false);
 
   const apiBase =
@@ -234,6 +266,10 @@ export default function DisplayPage() {
   }, [apiBase]);
 
   useEffect(() => {
+    fetchHistory();
+  }, [apiBase]);
+
+  useEffect(() => {
     const fetchProviders = async () => {
       try {
         setProvidersLoading(true);
@@ -258,6 +294,10 @@ export default function DisplayPage() {
       }
     };
     fetchProviders();
+  }, [apiBase]);
+
+  useEffect(() => {
+    fetchHistory();
   }, [apiBase]);
 
   useEffect(() => {
@@ -481,8 +521,16 @@ export default function DisplayPage() {
     setAnalysisLoading(true);
     try {
       const cashValue = Number.parseFloat(cashInput.replace(/,/g, ""));
+      const providerInfo = providers.find(
+        (item) => item.name === selectedProvider
+      );
+      const modelValue =
+        providerInfo?.defaultModel && providerInfo.defaultModel.trim()
+          ? providerInfo.defaultModel.trim()
+          : undefined;
       const payload = {
         provider: selectedProvider || providers[0]?.name || "gpt",
+        model: modelValue,
         feedRef: {
           tradableTickers: selectedTickers,
           includePositions: true,
@@ -505,8 +553,56 @@ export default function DisplayPage() {
       setAnalysisResult(data.result);
       setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
       setAnalysisRunId(data.id);
+      fetchHistory();
     } catch (err) {
       setAnalysisError(err instanceof Error ? err.message : "分析失败。");
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      const res = await fetch(`${apiBase}/api/analysis/history?limit=20`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as AnalysisHistoryResponse;
+      setHistory(data.items || []);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "加载历史失败。");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const loadHistoryItem = async (id: number) => {
+    try {
+      setAnalysisLoading(true);
+      setAnalysisView("result");
+      setAnalysisError(null);
+      const res = await fetch(`${apiBase}/api/analysis/${id}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as AnalysisRecordResponse;
+      if (data.result) {
+        setAnalysisResult(data.result);
+        setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
+        setAnalysisRunId(data.id);
+      } else {
+        setAnalysisError("该记录没有可用的结果。");
+      }
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : "加载历史失败。");
     } finally {
       setAnalysisLoading(false);
     }
@@ -759,19 +855,19 @@ export default function DisplayPage() {
           </section>
 
           <section className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold">LLM Analysis</h3>
-                <p className="text-xs text-slate-500">
-                  选择 provider，基于当前 feed 生成可执行的结构化建议。
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <select
-                  value={selectedProvider}
-                  disabled={providersLoading || !providers.length}
-                  onChange={(event) => setSelectedProvider(event.target.value)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">LLM Analysis</h3>
+              <p className="text-xs text-slate-500">
+                选择 provider，基于当前 feed 生成可执行的结构化建议。
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={selectedProvider}
+                disabled={providersLoading || !providers.length}
+                onChange={(event) => setSelectedProvider(event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
                 >
                   {providers.map((item) => (
                     <option key={item.name} value={item.name}>
@@ -806,11 +902,37 @@ export default function DisplayPage() {
                 >
                   {analysisLoading ? "分析中..." : "Analyze"}
                 </button>
+            </div>
+          </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+              <span>
+                需先点击 Load 准备缓存；未准备好时按钮将置灰。
+              </span>
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1">
+                <button
+                  type="button"
+                  onClick={() => setAnalysisView("result")}
+                  className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                    analysisView === "result"
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-700"
+                  }`}
+                >
+                  Result
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnalysisView("history")}
+                  className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                    analysisView === "history"
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-700"
+                  }`}
+                >
+                  History
+                </button>
               </div>
             </div>
-            <p className="mt-2 text-xs text-slate-500">
-              需先点击 Load 准备缓存；未准备好时按钮将置灰。
-            </p>
             {analysisError && (
               <p className="mt-3 text-xs text-rose-500">{analysisError}</p>
             )}
@@ -827,7 +949,7 @@ export default function DisplayPage() {
               </div>
             )}
 
-            {analysisResult && (
+            {analysisView === "result" && analysisResult && (
               <div className="mt-5 space-y-4">
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -916,6 +1038,71 @@ export default function DisplayPage() {
                   </div>
                 )}
 
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-800">
+                      History
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={fetchHistory}
+                      disabled={historyLoading}
+                      className="text-xs text-slate-600 underline hover:text-slate-800 disabled:opacity-60"
+                    >
+                      {historyLoading ? "刷新中..." : "刷新"}
+                    </button>
+                  </div>
+                  {historyError && (
+                    <p className="mt-2 text-xs text-rose-500">{historyError}</p>
+                  )}
+                  {!historyLoading && !history.length && !historyError && (
+                    <p className="mt-2 text-xs text-slate-500">暂无历史记录。</p>
+                  )}
+                  {history.length > 0 && (
+                    <div className="mt-3 divide-y divide-slate-100">
+                      {history.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex flex-wrap items-center justify-between gap-3 py-2"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-slate-800">
+                              #{item.id} · {item.provider}/{item.model}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {formatIsoDatetime(item.createdAt)} ·{" "}
+                              {item.tickers.join(", ")}
+                            </div>
+                            <div className="text-xs text-slate-600">
+                              {item.summary || item.error || "无摘要"}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${
+                                item.status === "succeeded"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : item.status === "running"
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-rose-100 text-rose-700"
+                              }`}
+                            >
+                              {item.status}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => loadHistoryItem(item.id)}
+                              className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:border-slate-300"
+                            >
+                              查看
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="text-xs font-semibold text-slate-700">
                     Raw JSON
@@ -932,6 +1119,81 @@ export default function DisplayPage() {
                     />
                   </div>
                 </div>
+              </div>
+            )}
+
+            {analysisView === "result" && !analysisResult && !analysisLoading && (
+              <div className="mt-4 text-xs text-slate-500">
+                {cacheReady
+                  ? "生成 feed 后点击 Analyze 运行一次模型。"
+                  : "请先点击 Load，等待缓存就绪。"}
+              </div>
+            )}
+
+            {analysisView === "history" && (
+              <div className="mt-5 space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-slate-800">
+                    History (最近 20 条)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={fetchHistory}
+                    disabled={historyLoading}
+                    className="text-xs text-slate-600 underline hover:text-slate-800 disabled:opacity-60"
+                  >
+                    {historyLoading ? "刷新中..." : "刷新"}
+                  </button>
+                </div>
+                {historyError && (
+                  <p className="text-xs text-rose-500">{historyError}</p>
+                )}
+                {!historyLoading && !history.length && !historyError && (
+                  <p className="text-xs text-slate-500">暂无历史记录。</p>
+                )}
+                {history.length > 0 && (
+                  <div className="divide-y divide-slate-100">
+                    {history.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex flex-wrap items-center justify-between gap-3 py-2"
+                      >
+                        <div>
+                          <div className="text-sm font-semibold text-slate-800">
+                            #{item.id} · {item.provider}/{item.model}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {formatIsoDatetime(item.createdAt)} ·{" "}
+                            {item.tickers.join(", ")}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {item.summary || item.error || "无摘要"}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${
+                              item.status === "succeeded"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : item.status === "running"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-rose-100 text-rose-700"
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => loadHistoryItem(item.id)}
+                            className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:border-slate-300"
+                          >
+                            查看
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>
