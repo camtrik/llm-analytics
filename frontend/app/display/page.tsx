@@ -70,6 +70,49 @@ type FeedResponse = {
   };
 };
 
+type ProviderInfo = {
+  name: string;
+  defaultModel: string;
+  baseUrl: string;
+  available: boolean;
+};
+
+type ProvidersResponse = {
+  providers: ProviderInfo[];
+  defaultProvider: string;
+};
+
+type AnalysisAction = {
+  ticker: string;
+  action: "BUY" | "SELL" | "HOLD" | "REDUCE" | "INCREASE";
+  timeframe: string;
+  qty?: number | null;
+  targetWeight?: number | null;
+  deltaWeight?: number | null;
+  rationale: string;
+  risk?: string | null;
+  confidence: number;
+};
+
+type AnalysisResult = {
+  meta: {
+    asOf: string;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    feedMeta: Record<string, unknown>;
+  };
+  summary: string;
+  actions: AnalysisAction[];
+  doNotTradeIf: string[];
+};
+
+type AnalysisRunResponse = {
+  id: number;
+  result: AnalysisResult;
+  raw?: string | null;
+};
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -98,6 +141,24 @@ function formatIsoDatetime(value: string | null | undefined) {
 function formatTickerLabel(ticker: string, info?: Record<string, string>) {
   const name = info?.[ticker];
   return name ? `${ticker} (${name})` : ticker;
+}
+
+function formatActionSize(action: AnalysisAction) {
+  if (action.qty !== null && action.qty !== undefined) {
+    return `${action.qty}`;
+  }
+  if (action.targetWeight !== null && action.targetWeight !== undefined) {
+    return `${(action.targetWeight * 100).toFixed(2)}% target`;
+  }
+  if (action.deltaWeight !== null && action.deltaWeight !== undefined) {
+    return `${(action.deltaWeight * 100).toFixed(2)}% change`;
+  }
+  return "-";
+}
+
+function formatConfidence(value: number) {
+  if (Number.isNaN(value)) return "-";
+  return `${(value * 100).toFixed(0)}%`;
 }
 
 function timeframeOrderValue(timeframe: string) {
@@ -129,6 +190,15 @@ export default function DisplayPage() {
   const [feed, setFeed] = useState<FeedResponse | null>(null);
   const [feedLoading, setFeedLoading] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [selectedProvider, setSelectedProvider] = useState<string>("");
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisRaw, setAnalysisRaw] = useState<string | null>(null);
+  const [analysisRunId, setAnalysisRunId] = useState<number | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [cashInput, setCashInput] = useState<string>("1000000");
   const [cacheReady, setCacheReady] = useState(false);
 
   const apiBase =
@@ -164,7 +234,40 @@ export default function DisplayPage() {
   }, [apiBase]);
 
   useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        setProvidersLoading(true);
+        const res = await fetch(`${apiBase}/api/analysis/providers`, {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`加载 provider 失败 (${res.status})`);
+        }
+        const data = (await res.json()) as ProvidersResponse;
+        setProviders(data.providers);
+        const defaultName =
+          data.defaultProvider || data.providers[0]?.name || "";
+        setSelectedProvider(defaultName);
+        setAnalysisError(null);
+      } catch (err) {
+        setAnalysisError(
+          err instanceof Error ? err.message : "加载 provider 失败。"
+        );
+      } finally {
+        setProvidersLoading(false);
+      }
+    };
+    fetchProviders();
+  }, [apiBase]);
+
+  useEffect(() => {
     setCacheReady(false);
+    setFeed(null);
+    setFeedError(null);
+    setAnalysisResult(null);
+    setAnalysisRaw(null);
+    setAnalysisRunId(null);
+    setAnalysisError(null);
   }, [selectedTickers]);
 
   const filteredTickers = useMemo(() => {
@@ -186,6 +289,20 @@ export default function DisplayPage() {
       (a, b) => timeframeOrderValue(a) - timeframeOrderValue(b)
     );
   }, [options]);
+
+  const activeProviderInfo = useMemo(
+    () => providers.find((item) => item.name === selectedProvider) || null,
+    [providers, selectedProvider]
+  );
+
+  const parsedAnalysisRaw = useMemo(() => {
+    if (!analysisRaw) return analysisResult;
+    try {
+      return JSON.parse(analysisRaw);
+    } catch (err) {
+      return analysisResult;
+    }
+  }, [analysisRaw, analysisResult]);
 
   const toggleTicker = (ticker: string) => {
     setSelectedTickers((prev) => {
@@ -211,6 +328,12 @@ export default function DisplayPage() {
     setError(null);
     setLoading(true);
     setCacheReady(false);
+    setFeed(null);
+    setFeedError(null);
+    setAnalysisResult(null);
+    setAnalysisRaw(null);
+    setAnalysisRunId(null);
+    setAnalysisError(null);
     try {
       const refreshRes = await fetch(`${apiBase}/api/refresh`, {
         method: "POST",
@@ -335,6 +458,57 @@ export default function DisplayPage() {
       setFeedError(err instanceof Error ? err.message : "请求失败。");
     } finally {
       setFeedLoading(false);
+    }
+  };
+
+  const runAnalysis = async () => {
+    if (!selectedTickers.length) {
+      setAnalysisError("请选择至少一个 ticker。");
+      return;
+    }
+    if (!cacheReady) {
+      setAnalysisError("请先点击 Load 完成缓存，再进行分析。");
+      return;
+    }
+    const providerInfo = providers.find(
+      (item) => item.name === selectedProvider
+    );
+    if (providerInfo && !providerInfo.available) {
+      setAnalysisError("所选 provider 尚未配置 API Key。");
+      return;
+    }
+    setAnalysisError(null);
+    setAnalysisLoading(true);
+    try {
+      const cashValue = Number.parseFloat(cashInput.replace(/,/g, ""));
+      const payload = {
+        provider: selectedProvider || providers[0]?.name || "gpt",
+        feedRef: {
+          tradableTickers: selectedTickers,
+          includePositions: true,
+        },
+        constraints: {
+          cash: Number.isFinite(cashValue) ? cashValue : 1000000,
+        },
+        promptVersion: "v1",
+      };
+      const res = await fetch(`${apiBase}/api/analysis/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as AnalysisRunResponse;
+      setAnalysisResult(data.result);
+      setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
+      setAnalysisRunId(data.id);
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : "分析失败。");
+    } finally {
+      setAnalysisLoading(false);
     }
   };
 
@@ -580,6 +754,184 @@ export default function DisplayPage() {
                   keyName="feed"
                   style={githubLightTheme}
                 />
+              </div>
+            )}
+          </section>
+
+          <section className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">LLM Analysis</h3>
+                <p className="text-xs text-slate-500">
+                  选择 provider，基于当前 feed 生成可执行的结构化建议。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <select
+                  value={selectedProvider}
+                  disabled={providersLoading || !providers.length}
+                  onChange={(event) => setSelectedProvider(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                >
+                  {providers.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name} ({item.defaultModel})
+                    </option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2 text-xs text-slate-600">
+                  <label className="text-xs font-medium text-slate-700">
+                    可用现金
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="1000"
+                    value={cashInput}
+                    onChange={(event) => setCashInput(event.target.value)}
+                    className="w-28 rounded-lg border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={runAnalysis}
+                  disabled={
+                    analysisLoading ||
+                    !cacheReady ||
+                    !selectedProvider ||
+                    providersLoading ||
+                    (activeProviderInfo && !activeProviderInfo.available)
+                  }
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {analysisLoading ? "分析中..." : "Analyze"}
+                </button>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              需先点击 Load 准备缓存；未准备好时按钮将置灰。
+            </p>
+            {analysisError && (
+              <p className="mt-3 text-xs text-rose-500">{analysisError}</p>
+            )}
+            {activeProviderInfo && !activeProviderInfo.available && (
+              <p className="mt-3 text-xs text-amber-600">
+                Provider {activeProviderInfo.name} 尚未配置 API Key。
+              </p>
+            )}
+            {!analysisResult && !analysisLoading && (
+              <div className="mt-4 text-xs text-slate-500">
+                {cacheReady
+                  ? "生成 feed 后点击 Analyze 运行一次模型。"
+                  : "请先点击 Load，等待缓存就绪。"}
+              </div>
+            )}
+
+            {analysisResult && (
+              <div className="mt-5 space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">
+                        Summary
+                      </div>
+                      <p className="mt-1 text-sm text-slate-700">
+                        {analysisResult.summary}
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-slate-500">
+                      <div>ID: #{analysisRunId ?? "-"}</div>
+                      <div>
+                        As of: {formatIsoDatetime(analysisResult.meta.asOf)}
+                      </div>
+                      <div>Provider: {analysisResult.meta.provider}</div>
+                      <div>Model: {analysisResult.meta.model}</div>
+                      <div>Prompt: {analysisResult.meta.promptVersion}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-800">
+                      Actions
+                    </h4>
+                    <span className="text-xs text-slate-500">
+                      {analysisResult.actions.length} 项
+                    </span>
+                  </div>
+                  {analysisResult.actions.length ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {analysisResult.actions.map((action, index) => (
+                        <div
+                          key={`${action.ticker}-${index}`}
+                          className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-slate-800">
+                              {formatTickerLabel(action.ticker, options?.tickerInfo)}
+                            </div>
+                            <span className="rounded-full bg-slate-900 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+                              {action.action}
+                            </span>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                            <div>Timeframe: {action.timeframe}</div>
+                            <div>信心: {formatConfidence(action.confidence)}</div>
+                            <div>Size: {formatActionSize(action)}</div>
+                            <div>
+                              Weight:
+                              {action.targetWeight !== null &&
+                              action.targetWeight !== undefined
+                                ? ` ${(action.targetWeight * 100).toFixed(2)}%`
+                                : " -"}
+                            </div>
+                          </div>
+                          <div className="mt-2 text-xs text-slate-700">
+                            理由：{action.rationale}
+                          </div>
+                          {action.risk && (
+                            <div className="mt-1 text-xs text-amber-700">
+                              风险：{action.risk}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-xs text-slate-500">
+                      暂无具体操作，保持观察。
+                    </div>
+                  )}
+                </div>
+
+                {analysisResult.doNotTradeIf.length > 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
+                    <div className="font-semibold">Do not trade if</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {analysisResult.doNotTradeIf.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="text-xs font-semibold text-slate-700">
+                    Raw JSON
+                  </div>
+                  <div className="mt-2 max-h-64 overflow-auto rounded-lg border border-slate-100">
+                    <JsonView
+                      value={parsedAnalysisRaw || analysisResult || {}}
+                      collapsed={2}
+                      displayDataTypes={false}
+                      displayObjectSize={false}
+                      enableClipboard={true}
+                      keyName="analysis"
+                      style={githubLightTheme}
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </section>

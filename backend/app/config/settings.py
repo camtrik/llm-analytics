@@ -13,6 +13,49 @@ class Settings:
     max_limit: int
     feed_max_tickers: int
     cors_origins: list[str]
+    llm: "LlmSettings"
+
+
+@dataclass(frozen=True)
+class LlmProviderSettings:
+    base_url: str
+    api_key: str
+    model: str
+
+
+@dataclass(frozen=True)
+class LlmSettings:
+    default_provider: str
+    gpt: LlmProviderSettings
+    deepseek: LlmProviderSettings
+
+
+def _load_llm_provider(
+    data: dict[str, object] | None,
+    default_base_url: str,
+    default_model: str,
+) -> LlmProviderSettings:
+    data = data or {}
+    base_url = str(data.get("base_url") or default_base_url)
+    api_key = str(data.get("api_key") or "")
+    model = str(data.get("model") or default_model)
+    return LlmProviderSettings(base_url=base_url, api_key=api_key, model=model)
+
+
+def _load_llm_settings(data: dict[str, object] | None) -> LlmSettings:
+    data = data or {}
+    default_provider = str(data.get("default_provider") or "gpt")
+    gpt = _load_llm_provider(
+        data.get("gpt") if isinstance(data.get("gpt"), dict) else {},
+        default_base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+    )
+    deepseek = _load_llm_provider(
+        data.get("deepseek") if isinstance(data.get("deepseek"), dict) else {},
+        default_base_url="https://api.deepseek.com/v1",
+        default_model="deepseek-chat",
+    )
+    return LlmSettings(default_provider=default_provider, gpt=gpt, deepseek=deepseek)
 
 
 def load_settings() -> Settings:
@@ -41,9 +84,14 @@ def load_settings() -> Settings:
         cors_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()]
     else:
         cors_origins = [str(item).strip() for item in cors_origins_raw if str(item).strip()]
+
+    llm_settings = _load_llm_settings(
+        data.get("llm") if isinstance(data.get("llm"), dict) else {}
+    )
     return Settings(
         runtime_dir=runtime_dir,
         max_limit=max_limit,
         feed_max_tickers=feed_max_tickers,
         cors_origins=cors_origins,
+        llm=llm_settings,
     )

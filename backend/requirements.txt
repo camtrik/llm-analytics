@@ -4,3 +4,4 @@ pandas
 yfinance
 pyyaml
 python-multipart
+httpx
