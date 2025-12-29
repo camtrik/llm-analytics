@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug backend",
+      "type": "python",db
+      "request": "launch",
+      "module": "uvicorn",
+      "cwd": "${workspaceFolder}/backend",
+      "env": { "PYTHONPATH": "${workspaceFolder}/backend" },
+      "args": [
+        "app.main:app",
+        "--reload",
+        "--port",
+        "8000",
+        "--log-level",
+        "debug"
+      ]
+    }
+  ]
+}
