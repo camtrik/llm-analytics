@@ -10,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 
 from app.analysis.models import FeedResponse
 from app.analysis.schema import (
+    ChatMessage,
     AnalysisConstraints,
     AnalysisHistoryItem,
     AnalysisHistoryResponse,
@@ -69,11 +70,19 @@ class AnalysisStore:
                     constraints_json TEXT,
                     result_json TEXT,
                     raw_text TEXT,
+                    messages_json TEXT,
                     status TEXT NOT NULL,
                     error TEXT
                 );
                 """
             )
+            # Add missing columns for backward compatibility
+            existing = {
+                row[1]: row[0]
+                for row in conn.execute("PRAGMA table_info(analysis_runs);").fetchall()
+            }
+            if "messages_json" not in existing:
+                conn.execute("ALTER TABLE analysis_runs ADD COLUMN messages_json TEXT;")
             conn.commit()
 
     def create_run(
@@ -83,17 +92,19 @@ class AnalysisStore:
         prompt_version: str,
         feed: FeedResponse,
         constraints: AnalysisConstraints | None,
+        messages: list[ChatMessage] | None = None,
     ) -> int:
         created_at = datetime.now(timezone.utc).isoformat()
         feed_json = _json_dumps(_model_dump(feed))
         constraints_json = _json_dumps(_model_dump(constraints)) if constraints else None
+        messages_json = _json_dumps(_model_dump(messages)) if messages else None
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO analysis_runs (
                     created_at, provider, model, prompt_version, feed_json,
-                    constraints_json, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                    constraints_json, messages_json, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     created_at,
@@ -102,6 +113,7 @@ class AnalysisStore:
                     prompt_version,
                     feed_json,
                     constraints_json,
+                    messages_json,
                     "running",
                 ),
             )
@@ -113,28 +125,31 @@ class AnalysisStore:
         run_id: int,
         result: AnalysisResult,
         raw_text: str | None,
+        messages: list[ChatMessage] | None,
     ) -> None:
         result_json = _json_dumps(_model_dump(result))
+        messages_json = _json_dumps(_model_dump(messages)) if messages else None
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE analysis_runs
-                SET result_json = ?, raw_text = ?, status = ?
+                SET result_json = ?, raw_text = ?, messages_json = ?, status = ?
                 WHERE id = ?;
                 """,
-                (result_json, raw_text, "succeeded", run_id),
+                (result_json, raw_text, messages_json, "succeeded", run_id),
             )
             conn.commit()
 
-    def fail_run(self, run_id: int, error: str) -> None:
+    def fail_run(self, run_id: int, error: str, messages: list[ChatMessage] | None = None) -> None:
+        messages_json = _json_dumps(_model_dump(messages)) if messages else None
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE analysis_runs
-                SET status = ?, error = ?
+                SET status = ?, error = ?, messages_json = COALESCE(messages_json, ?)
                 WHERE id = ?;
                 """,
-                ("failed", error, run_id),
+                ("failed", error, messages_json, run_id),
             )
             conn.commit()
 
@@ -144,6 +159,7 @@ class AnalysisStore:
                 """
                 SELECT id, created_at, provider, model, prompt_version,
                        feed_json, constraints_json, result_json, raw_text,
+                       messages_json,
                        status, error
                 FROM analysis_runs
                 WHERE id = ?;
@@ -156,6 +172,7 @@ class AnalysisStore:
         feed = self._decode_feed(row["feed_json"])
         constraints = self._decode_constraints(row["constraints_json"])
         result = self._decode_result(row["result_json"])
+        messages = self._decode_messages(row["messages_json"])
         return AnalysisRecord(
             id=int(row["id"]),
             createdAt=_parse_datetime(row["created_at"]),
@@ -166,6 +183,7 @@ class AnalysisStore:
             constraints=constraints,
             result=result,
             raw=row["raw_text"],
+            messages=messages,
             status=row["status"],
             error=row["error"],
         )
@@ -236,6 +254,25 @@ class AnalysisStore:
         except json.JSONDecodeError:
             return None
         return validate_analysis_result(data)
+
+    def _decode_messages(self, payload: str | None) -> list[ChatMessage] | None:
+        if not payload:
+            return None
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, list):
+            return None
+        messages: list[ChatMessage] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if isinstance(role, str) and isinstance(content, str):
+                messages.append(ChatMessage(role=role, content=content))  # type: ignore[arg-type]
+        return messages or None
 
 
 _settings = load_settings()

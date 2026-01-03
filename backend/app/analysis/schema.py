@@ -12,6 +12,11 @@ from app.analysis.models import FeedRequest, FeedResponse
 ProviderName = Literal["gpt", "deepseek"]
 
 
+class ChatMessage(BaseModel):
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
 class AnalysisConstraints(BaseModel):
     cash: float | None = Field(
         None, description="Available cash. If unknown, prefer weight-based sizing."
@@ -91,6 +96,21 @@ class AnalysisRunResponse(BaseModel):
     id: int
     result: AnalysisResult
     raw: str | None = None
+    messages: list[ChatMessage] | None = None
+    feed: FeedResponse | None = None
+    constraints: AnalysisConstraints | None = None
+
+
+class AnalysisContinueRequest(BaseModel):
+    runId: int
+    userMessage: str = Field(..., min_length=1)
+
+
+class AnalysisContinueResponse(BaseModel):
+    id: int
+    result: AnalysisResult
+    raw: str | None = None
+    messages: list[ChatMessage] | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -131,6 +151,7 @@ class AnalysisRecord(BaseModel):
     constraints: AnalysisConstraints | None = None
     result: AnalysisResult | None = None
     raw: str | None = None
+    messages: list[ChatMessage] | None = None
     status: str
     error: str | None = None
 

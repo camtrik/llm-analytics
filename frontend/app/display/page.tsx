@@ -5,6 +5,8 @@ import RangeSwitcherChart from "./RangeSwitcherChart";
 import JsonView from "@uiw/react-json-view";
 import { githubLightTheme } from "@uiw/react-json-view/githubLight";
 
+import { useRef } from "react";
+
 type OptionsResponse = {
   tickers: string[];
   timeframes: string[];
@@ -82,6 +84,11 @@ type ProvidersResponse = {
   defaultProvider: string;
 };
 
+type ChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
 type AnalysisAction = {
   ticker: string;
   action: "BUY" | "SELL" | "HOLD" | "REDUCE" | "INCREASE";
@@ -111,6 +118,19 @@ type AnalysisRunResponse = {
   id: number;
   result: AnalysisResult;
   raw?: string | null;
+  messages?: ChatMessage[] | null;
+  feed?: FeedResponse | null;
+  constraints?: {
+    cash?: number | null;
+    maxOrders?: number;
+    allowBuy?: boolean;
+    allowSell?: boolean;
+    allowShort?: boolean;
+    lotSize?: number | null;
+    feesBps?: number | null;
+    slippageBps?: number | null;
+    riskBudget?: number | null;
+  } | null;
 };
 
 type AnalysisRecordResponse = {
@@ -123,6 +143,7 @@ type AnalysisRecordResponse = {
   error?: string | null;
   result?: AnalysisResult | null;
   raw?: string | null;
+  messages?: ChatMessage[] | null;
 };
 
 type AnalysisHistoryItem = {
@@ -231,7 +252,10 @@ export default function DisplayPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [analysisView, setAnalysisView] = useState<"result" | "history">("result");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
   const [cacheReady, setCacheReady] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   const apiBase =
     process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
@@ -268,6 +292,12 @@ export default function DisplayPage() {
   useEffect(() => {
     fetchHistory();
   }, [apiBase]);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -308,6 +338,8 @@ export default function DisplayPage() {
     setAnalysisRaw(null);
     setAnalysisRunId(null);
     setAnalysisError(null);
+    setChatMessages([]);
+    setChatInput("");
   }, [selectedTickers]);
 
   const filteredTickers = useMemo(() => {
@@ -553,6 +585,8 @@ export default function DisplayPage() {
       setAnalysisResult(data.result);
       setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
       setAnalysisRunId(data.id);
+      setChatMessages(data.messages || []);
+      setAnalysisView("result");
       fetchHistory();
     } catch (err) {
       setAnalysisError(err instanceof Error ? err.message : "分析失败。");
@@ -598,11 +632,47 @@ export default function DisplayPage() {
         setAnalysisResult(data.result);
         setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
         setAnalysisRunId(data.id);
+        setChatMessages(data.messages || []);
+        setAnalysisView("result");
       } else {
         setAnalysisError("该记录没有可用的结果。");
       }
     } catch (err) {
       setAnalysisError(err instanceof Error ? err.message : "加载历史失败。");
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
+  const sendChat = async () => {
+    if (!analysisRunId) {
+      setAnalysisError("请先运行或加载一条分析记录。");
+      return;
+    }
+    const content = chatInput.trim();
+    if (!content) return;
+    // Optimistic append user message
+    setChatMessages((prev) => [...prev, { role: "user", content }]);
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    try {
+      const res = await fetch(`${apiBase}/api/analysis/continue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: analysisRunId, userMessage: content }),
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as AnalysisRunResponse;
+      setAnalysisResult(data.result);
+      setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
+      setChatMessages(data.messages || []);
+      setChatInput("");
+      setAnalysisView("result");
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : "发送失败。");
     } finally {
       setAnalysisLoading(false);
     }
@@ -908,31 +978,31 @@ export default function DisplayPage() {
               <span>
                 需先点击 Load 准备缓存；未准备好时按钮将置灰。
               </span>
-              <div className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1">
-                <button
-                  type="button"
-                  onClick={() => setAnalysisView("result")}
-                  className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                <div className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1">
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisView("result")}
+                    className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
                     analysisView === "result"
                       ? "bg-slate-900 text-white"
                       : "text-slate-700"
                   }`}
-                >
-                  Result
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAnalysisView("history")}
-                  className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-                    analysisView === "history"
-                      ? "bg-slate-900 text-white"
-                      : "text-slate-700"
-                  }`}
-                >
-                  History
-                </button>
+                  >
+                    Result
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisView("history")}
+                    className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                      analysisView === "history"
+                        ? "bg-slate-900 text-white"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    History
+                  </button>
+                </div>
               </div>
-            </div>
             {analysisError && (
               <p className="mt-3 text-xs text-rose-500">{analysisError}</p>
             )}
@@ -1037,6 +1107,67 @@ export default function DisplayPage() {
                     </ul>
                   </div>
                 )}
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-800">
+                      Chat（续聊当前会话）
+                    </h4>
+                    <span className="text-xs text-slate-500">
+                      {analysisRunId ? `Run #${analysisRunId}` : "未选择会话"}
+                    </span>
+                  </div>
+                  {!chatMessages.length && (
+                    <p className="text-xs text-slate-500">
+                      先运行 Analyze 或在历史中点击“查看”加载会话，再继续对话。
+                    </p>
+                  )}
+                  {chatMessages.length > 0 && (
+                    <div
+                      className="max-h-72 space-y-2 overflow-auto rounded-lg border border-slate-100 p-3"
+                      ref={chatContainerRef}
+                    >
+                      {chatMessages
+                        .filter((msg) => msg.role !== "system")
+                        .map((msg, index) => (
+                          <div
+                            key={`${msg.role}-${index}`}
+                            className={`text-sm ${
+                              msg.role === "assistant" ? "text-slate-800" : "text-slate-600"
+                            }`}
+                          >
+                            <span className="mr-2 text-xs font-semibold uppercase text-slate-500">
+                              {msg.role}
+                            </span>
+                            <span className="whitespace-pre-wrap">{msg.content}</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-col gap-2">
+                    <textarea
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      rows={3}
+                      placeholder={
+                        analysisRunId
+                          ? "输入你的追问或补充说明..."
+                          : "请先运行一次 Analyze 或从历史加载记录。"
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={sendChat}
+                        disabled={!analysisRunId || analysisLoading || !chatInput.trim()}
+                        className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {analysisLoading ? "发送中..." : "Send"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex items-center justify-between">

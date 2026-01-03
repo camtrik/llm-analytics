@@ -9,6 +9,8 @@ from app.analysis.schema import (
     AnalysisRecord,
     AnalysisRunRequest,
     AnalysisRunResponse,
+    AnalysisContinueRequest,
+    AnalysisContinueResponse,
     ProvidersResponse,
 )
 from app.analysis.service import get_analysis_service
@@ -49,3 +51,8 @@ def analysis_history(
 @router.get("/analysis/{run_id}", response_model=AnalysisRecord)
 def analysis_result(run_id: int) -> AnalysisRecord:
     return service.get_run(run_id)
+
+
+@router.post("/analysis/continue", response_model=AnalysisContinueResponse)
+def analysis_continue(payload: AnalysisContinueRequest) -> AnalysisContinueResponse:
+    return service.continue_run(payload)
