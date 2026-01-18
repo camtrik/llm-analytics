@@ -208,8 +208,24 @@ type QuantSignal = {
   asOf: string;
 };
 
+type QuantRecommendation = {
+  position: number;
+  action: "BUY" | "INCREASE" | "REDUCE" | "SELL" | "HOLD";
+  reasonCodes: string[];
+};
+
+type QuantLatestIndicators = {
+  fastMA?: number | null;
+  slowMA?: number | null;
+  maDistance?: number | null;
+  rsi?: number | null;
+  rsiZone?: "oversold" | "neutral" | "overbought" | null;
+};
+
 type QuantResultItem = {
   signal: QuantSignal;
+  recommendation: QuantRecommendation;
+  latestIndicators?: QuantLatestIndicators | null;
   metrics: QuantMetrics;
 };
 
@@ -1258,7 +1274,7 @@ export default function DisplayPage() {
                         {formatTickerLabel(ticker, options?.tickerInfo)}
                       </div>
                       <span className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase text-white">
-                        {result.signal.action}
+                        {result.recommendation.action}
                       </span>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
@@ -1276,6 +1292,27 @@ export default function DisplayPage() {
                       {result.metrics.avgHoldBars !== null &&
                         result.metrics.avgHoldBars !== undefined && (
                           <div>Avg Hold Bars: {result.metrics.avgHoldBars.toFixed(1)}</div>
+                        )}
+                      {result.latestIndicators?.fastMA !== undefined &&
+                        result.latestIndicators?.fastMA !== null && (
+                          <div>Fast MA: {result.latestIndicators.fastMA.toFixed(2)}</div>
+                        )}
+                      {result.latestIndicators?.slowMA !== undefined &&
+                        result.latestIndicators?.slowMA !== null && (
+                          <div>Slow MA: {result.latestIndicators.slowMA.toFixed(2)}</div>
+                        )}
+                      {result.latestIndicators?.maDistance !== undefined &&
+                        result.latestIndicators?.maDistance !== null && (
+                          <div>
+                            MA Distance: {(result.latestIndicators.maDistance * 100).toFixed(2)}%
+                          </div>
+                        )}
+                      {result.latestIndicators?.rsi !== undefined &&
+                        result.latestIndicators?.rsi !== null && (
+                          <div>
+                            RSI: {result.latestIndicators.rsi.toFixed(2)}{" "}
+                            ({result.latestIndicators.rsiZone || "neutral"})
+                          </div>
                         )}
                     </div>
                   </div>

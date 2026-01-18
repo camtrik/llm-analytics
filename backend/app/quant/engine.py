@@ -18,7 +18,10 @@ from app.quant.schema import (
     BacktestRequest,
     BacktestResponse,
     EquityPoint,
+    LatestIndicators,
     Metrics,
+    Recommendation,
+    RecommendationAction,
     ResultItem,
     Signal,
     StrategySpec,
@@ -31,12 +34,16 @@ from app.quant.strategies.rsi_reversal import RsiReversalStrategy, compute_rsi_s
 class StrategyResult:
     signal: Action
     as_of: datetime
+    latest_indicators: LatestIndicators | None
     metrics: Metrics
     equity_curve: list[EquityPoint] | None
 
 
 def run_backtest(
-    cache: MarketCache, request: BacktestRequest, timeframe_map: dict[str, Timeframe]
+    cache: MarketCache,
+    request: BacktestRequest,
+    timeframe_map: dict[str, Timeframe],
+    holdings: dict[str, float],
 ) -> BacktestResponse:
     if request.mode != "independent":
         raise ApiError(
@@ -72,8 +79,12 @@ def run_backtest(
             initial_cash=request.initialCash,
             include_equity_curve=request.output.includeEquityCurve,
         )
+        has_position = bool(holdings.get(ticker, 0) > 0)
+        recommendation = _build_recommendation(strategy_result.signal, has_position)
         results[ticker] = ResultItem(
             signal=Signal(action=strategy_result.signal, asOf=strategy_result.as_of),
+            recommendation=recommendation,
+            latestIndicators=strategy_result.latest_indicators,
             metrics=strategy_result.metrics,
             equityCurve=strategy_result.equity_curve if request.output.includeEquityCurve else None,
         )
@@ -84,6 +95,8 @@ def run_backtest(
         longOnly=True,
         mode=request.mode,
         initialCash=request.initialCash,
+        executionPrice="close",
+        slippageApplied=False,
     )
     return BacktestResponse(
         timeframe=timeframe.name,
@@ -140,6 +153,7 @@ def _run_strategy_on_bars(
             df=df,
             stats=stats,
             signal=_ma_signal(df, fast, slow),
+            latest_indicators=_ma_latest(df, fast, slow),
             include_equity_curve=include_equity_curve,
             initial_cash=initial_cash,
         )
@@ -173,6 +187,7 @@ def _run_strategy_on_bars(
             df=df,
             stats=stats,
             signal=_rsi_signal(df, length, lower, upper),
+            latest_indicators=_rsi_latest(df, length, lower, upper),
             include_equity_curve=include_equity_curve,
             initial_cash=initial_cash,
         )
@@ -225,6 +240,7 @@ def _build_result_from_stats(
     df: pd.DataFrame,
     stats: pd.Series,
     signal: Action,
+    latest_indicators: LatestIndicators | None,
     include_equity_curve: bool,
     initial_cash: float,
 ) -> StrategyResult:
@@ -265,6 +281,7 @@ def _build_result_from_stats(
     return StrategyResult(
         signal=signal,
         as_of=df.index[-1],
+        latest_indicators=latest_indicators,
         metrics=metrics,
         equity_curve=equity_curve,
     )
@@ -300,6 +317,34 @@ def _rsi_signal(df: pd.DataFrame, length: int, lower: float, upper: float) -> Ac
     return "HOLD"
 
 
+def _ma_latest(df: pd.DataFrame, fast: int, slow: int) -> LatestIndicators:
+    fast_ma = df["Close"].rolling(fast, min_periods=fast).mean()
+    slow_ma = df["Close"].rolling(slow, min_periods=slow).mean()
+    fast_val = float(fast_ma.iloc[-1]) if not pd.isna(fast_ma.iloc[-1]) else None
+    slow_val = float(slow_ma.iloc[-1]) if not pd.isna(slow_ma.iloc[-1]) else None
+    distance = None
+    if fast_val is not None and slow_val:
+        distance = (fast_val - slow_val) / slow_val if slow_val != 0 else None
+    return LatestIndicators(
+        fastMA=fast_val,
+        slowMA=slow_val,
+        maDistance=distance,
+    )
+
+
+def _rsi_latest(df: pd.DataFrame, length: int, lower: float, upper: float) -> LatestIndicators:
+    rsi_series = compute_rsi_series(df["Close"], length)
+    latest = rsi_series.iloc[-1]
+    if pd.isna(latest):
+        return LatestIndicators(rsi=None, rsiZone=None)
+    zone = "neutral"
+    if latest < lower:
+        zone = "oversold"
+    elif latest > upper:
+        zone = "overbought"
+    return LatestIndicators(rsi=float(latest), rsiZone=zone)  # type: ignore[arg-type]
+
+
 def _compute_win_rate(trades_df: pd.DataFrame | None) -> float | None:
     if trades_df is None or trades_df.empty:
         return None
@@ -329,3 +374,28 @@ def _compute_avg_hold_bars(trades_df: pd.DataFrame | None) -> float | None:
             except Exception:
                 continue
     return None
+
+
+def _build_recommendation(signal: Action, has_position: bool) -> Recommendation:
+    if has_position:
+        if signal == "BUY":
+            action: RecommendationAction = "INCREASE"
+            reasons = ["trend_up"] if signal == "BUY" else []
+        elif signal == "SELL":
+            action = "REDUCE"
+            reasons = ["trend_down"]
+        else:
+            action = "HOLD"
+            reasons = []
+    else:
+        if signal == "BUY":
+            action = "BUY"
+            reasons = ["entry_allowed"]
+        else:
+            action = "HOLD"
+            reasons = []
+    return Recommendation(
+        position=1 if has_position or action in {"BUY", "INCREASE"} else 0,
+        action=action,
+        reasonCodes=reasons,
+    )

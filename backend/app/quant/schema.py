@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 Action = Literal["BUY", "SELL", "HOLD"]
+RecommendationAction = Literal["BUY", "INCREASE", "REDUCE", "SELL", "HOLD"]
 StrategyName = Literal["ma_crossover", "rsi_reversal"]
 Mode = Literal["independent", "portfolio"]
+RsiZone = Literal["oversold", "neutral", "overbought"]
 
 
 class StrategySpec(BaseModel):
@@ -46,6 +48,20 @@ class Signal(BaseModel):
     asOf: datetime
 
 
+class Recommendation(BaseModel):
+    position: int = Field(..., description="1=建议持有，0=建议空仓")
+    action: RecommendationAction
+    reasonCodes: list[str] = Field(default_factory=list)
+
+
+class LatestIndicators(BaseModel):
+    fastMA: float | None = None
+    slowMA: float | None = None
+    maDistance: float | None = None
+    rsi: float | None = None
+    rsiZone: RsiZone | None = None
+
+
 class Metrics(BaseModel):
     totalReturn: float
     maxDrawdown: float
@@ -61,6 +77,8 @@ class EquityPoint(BaseModel):
 
 class ResultItem(BaseModel):
     signal: Signal
+    recommendation: Recommendation
+    latestIndicators: LatestIndicators | None = None
     metrics: Metrics
     equityCurve: list[EquityPoint] | None = None
 
@@ -71,6 +89,8 @@ class Assumptions(BaseModel):
     longOnly: bool = True
     mode: Mode
     initialCash: float
+    executionPrice: str = "close"
+    slippageApplied: bool = False
 
 
 class BacktestResponse(BaseModel):
