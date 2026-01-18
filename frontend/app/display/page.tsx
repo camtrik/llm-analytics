@@ -180,6 +180,46 @@ type AnalysisTurn = {
 
 type PromptLanguage = "en" | "zh";
 
+type QuantStrategyName = "ma_crossover" | "rsi_reversal";
+
+type QuantStrategySpec = {
+  name: QuantStrategyName;
+  params: Record<string, number>;
+};
+
+type QuantAssumptions = {
+  feesBps: number;
+  slippageBps: number;
+  longOnly: boolean;
+  mode: "independent" | "portfolio";
+  initialCash: number;
+};
+
+type QuantMetrics = {
+  totalReturn: number;
+  maxDrawdown: number;
+  tradeCount: number;
+  winRate?: number | null;
+  avgHoldBars?: number | null;
+};
+
+type QuantSignal = {
+  action: "BUY" | "SELL" | "HOLD";
+  asOf: string;
+};
+
+type QuantResultItem = {
+  signal: QuantSignal;
+  metrics: QuantMetrics;
+};
+
+type QuantResponse = {
+  timeframe: string;
+  strategy: QuantStrategySpec;
+  assumptions: QuantAssumptions;
+  results: Record<string, QuantResultItem>;
+};
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -276,6 +316,15 @@ export default function DisplayPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [cacheReady, setCacheReady] = useState(false);
+  const [quantStrategy, setQuantStrategy] = useState<QuantStrategySpec>({
+    name: "ma_crossover",
+    params: { fast: 10, slow: 30 },
+  });
+  const [quantFeesBps, setQuantFeesBps] = useState<string>("10");
+  const [quantTimeframe, setQuantTimeframe] = useState<string>("6M_1d");
+  const [quantLoading, setQuantLoading] = useState(false);
+  const [quantError, setQuantError] = useState<string | null>(null);
+  const [quantResult, setQuantResult] = useState<QuantResponse | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   const apiBase =
@@ -363,6 +412,8 @@ export default function DisplayPage() {
     setChatInput("");
     setTurns([]);
     setTurnIndex(0);
+    setQuantResult(null);
+    setQuantError(null);
   }, [selectedTickers]);
 
   const filteredTickers = useMemo(() => {
@@ -432,6 +483,8 @@ export default function DisplayPage() {
     setAnalysisRaw(null);
     setAnalysisRunId(null);
     setAnalysisError(null);
+    setQuantResult(null);
+    setQuantError(null);
     try {
       const refreshRes = await fetch(`${apiBase}/api/refresh`, {
         method: "POST",
@@ -714,6 +767,48 @@ export default function DisplayPage() {
     }
   };
 
+  const runQuant = async () => {
+    const ticker = activeTicker || selectedTickers[0];
+    if (!ticker) {
+      setQuantError("请选择一个 ticker。");
+      return;
+    }
+    if (!cacheReady) {
+      setQuantError("请先点击 Load 完成缓存，再运行 Quant。");
+      return;
+    }
+    setQuantError(null);
+    setQuantLoading(true);
+    setQuantResult(null);
+    try {
+      const fees = Number.parseFloat(quantFeesBps.replace(/,/g, ""));
+      const payload = {
+        timeframe: quantTimeframe || "6M_1d",
+        tickers: [ticker],
+        strategy: quantStrategy,
+        costs: { feesBps: Number.isFinite(fees) ? fees : 0, slippageBps: 0 },
+        mode: "independent",
+        initialCash: 100000,
+        output: { includeEquityCurve: false },
+      };
+      const res = await fetch(`${apiBase}/api/quant/backtest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as QuantResponse;
+      setQuantResult(data);
+    } catch (err) {
+      setQuantError(err instanceof Error ? err.message : "回测失败。");
+    } finally {
+      setQuantLoading(false);
+    }
+  };
+
   const activeBars =
     activeTicker && activeTimeframe
       ? barsByTicker[activeTicker]?.[activeTimeframe] || []
@@ -956,6 +1051,235 @@ export default function DisplayPage() {
                   keyName="feed"
                   style={githubLightTheme}
                 />
+              </div>
+            )}
+          </section>
+
+          <section className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">Quant Backtest</h3>
+                <p className="text-xs text-slate-500">
+                  单次针对一个 ticker，默认 6M_1d，包含手续费。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <label className="text-xs font-medium text-slate-700">Ticker</label>
+                <select
+                  value={activeTicker}
+                  onChange={(event) => setActiveTicker(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                >
+                  {selectedTickers.map((ticker) => (
+                    <option key={ticker} value={ticker}>
+                      {formatTickerLabel(ticker, options?.tickerInfo)}
+                    </option>
+                  ))}
+                  {!selectedTickers.length && (
+                    <option value="">请选择 ticker</option>
+                  )}
+                </select>
+                <label className="text-xs font-medium text-slate-700">Timeframe</label>
+                <select
+                  value={quantTimeframe}
+                  onChange={(event) => setQuantTimeframe(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                >
+                  {(sortedTimeframes.length ? sortedTimeframes : ["6M_1d"]).map(
+                    (tf) => (
+                      <option key={tf} value={tf}>
+                        {tf}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="text-xs font-semibold text-slate-700">Strategy</div>
+                <select
+                  value={quantStrategy.name}
+                  onChange={(event) => {
+                    const nextName = event.target.value as QuantStrategyName;
+                    if (nextName === "ma_crossover") {
+                      setQuantStrategy({ name: nextName, params: { fast: 10, slow: 30 } });
+                    } else {
+                      setQuantStrategy({ name: nextName, params: { length: 14, lower: 30, upper: 70 } });
+                    }
+                  }}
+                  className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                >
+                  <option value="ma_crossover">MA Crossover</option>
+                  <option value="rsi_reversal">RSI Reversal</option>
+                </select>
+                {quantStrategy.name === "ma_crossover" ? (
+                  <div className="mt-3 space-y-2 text-xs text-slate-700">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Fast</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={quantStrategy.params.fast ?? 10}
+                        onChange={(e) =>
+                          setQuantStrategy((prev) => ({
+                            ...prev,
+                            params: { ...prev.params, fast: Number(e.target.value) },
+                          }))
+                        }
+                        className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Slow</span>
+                      <input
+                        type="number"
+                        min={2}
+                        value={quantStrategy.params.slow ?? 30}
+                        onChange={(e) =>
+                          setQuantStrategy((prev) => ({
+                            ...prev,
+                            params: { ...prev.params, slow: Number(e.target.value) },
+                          }))
+                        }
+                        className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-2 text-xs text-slate-700">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Length</span>
+                      <input
+                        type="number"
+                        min={2}
+                        value={quantStrategy.params.length ?? 14}
+                        onChange={(e) =>
+                          setQuantStrategy((prev) => ({
+                            ...prev,
+                            params: { ...prev.params, length: Number(e.target.value) },
+                          }))
+                        }
+                        className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Lower</span>
+                      <input
+                        type="number"
+                        value={quantStrategy.params.lower ?? 30}
+                        onChange={(e) =>
+                          setQuantStrategy((prev) => ({
+                            ...prev,
+                            params: { ...prev.params, lower: Number(e.target.value) },
+                          }))
+                        }
+                        className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Upper</span>
+                      <input
+                        type="number"
+                        value={quantStrategy.params.upper ?? 70}
+                        onChange={(e) =>
+                          setQuantStrategy((prev) => ({
+                            ...prev,
+                            params: { ...prev.params, upper: Number(e.target.value) },
+                          }))
+                        }
+                        className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="text-xs font-semibold text-slate-700">Costs</div>
+                <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-700">
+                  <span>Fees (bps)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="1"
+                    value={quantFeesBps}
+                    onChange={(e) => setQuantFeesBps(e.target.value)}
+                    className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  当前仅扣手续费，滑点未实现但会在假设中标注。
+                </p>
+              </div>
+
+              <div className="flex flex-col justify-between rounded-lg border border-slate-200 bg-white p-3">
+                <div className="text-xs font-semibold text-slate-700">Run</div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  需先完成 Load；单次回测一个 ticker。
+                </p>
+                <button
+                  type="button"
+                  onClick={runQuant}
+                  disabled={
+                    quantLoading ||
+                    !cacheReady ||
+                    !selectedTickers.length ||
+                    !activeTicker
+                  }
+                  className="mt-3 w-full rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {quantLoading ? "运行中..." : "Run Quant"}
+                </button>
+              </div>
+            </div>
+
+            {quantError && <p className="mt-3 text-xs text-rose-500">{quantError}</p>}
+
+            {quantResult && (
+              <div className="mt-4 space-y-3">
+                <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold text-slate-800">Assumptions</div>
+                    <div>
+                      手续费 {quantResult.assumptions.feesBps} bps · 模式{" "}
+                      {quantResult.assumptions.mode}
+                    </div>
+                  </div>
+                </div>
+                {Object.entries(quantResult.results).map(([ticker, result]) => (
+                  <div
+                    key={ticker}
+                    className="rounded-lg border border-slate-200 bg-white p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold text-slate-800">
+                        {formatTickerLabel(ticker, options?.tickerInfo)}
+                      </div>
+                      <span className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase text-white">
+                        {result.signal.action}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
+                      <div>As of: {formatIsoDatetime(result.signal.asOf)}</div>
+                      <div>
+                        Total Return: {(result.metrics.totalReturn * 100).toFixed(2)}%
+                      </div>
+                      <div>
+                        Max DD: {(result.metrics.maxDrawdown * 100).toFixed(2)}%
+                      </div>
+                      <div>Trades: {result.metrics.tradeCount}</div>
+                      {result.metrics.winRate !== null && result.metrics.winRate !== undefined && (
+                        <div>Win Rate: {(result.metrics.winRate * 100).toFixed(1)}%</div>
+                      )}
+                      {result.metrics.avgHoldBars !== null &&
+                        result.metrics.avgHoldBars !== undefined && (
+                          <div>Avg Hold Bars: {result.metrics.avgHoldBars.toFixed(1)}</div>
+                        )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </section>
