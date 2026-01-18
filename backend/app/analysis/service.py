@@ -75,6 +75,7 @@ class AnalysisService:
                 model=model,
                 provider=payload.provider,
                 prompt_version=payload.promptVersion,
+                prompt_language=payload.promptLanguage,
                 messages_override=None,
             )
             turns = [
@@ -146,6 +147,7 @@ class AnalysisService:
                 model=record.model,
                 provider=record.provider,
                 prompt_version=record.promptVersion,
+                prompt_language="en",
                 messages_override=messages,
             )
             new_turn = self._build_turn(
@@ -206,7 +208,8 @@ class AnalysisService:
         model: str,
         provider: str,
         prompt_version: str,
-        messages_override: list[dict[str, str]] | None,
+        prompt_language: str = "en",
+        messages_override: list[dict[str, str]] | None = None,
     ) -> tuple[AnalysisResult, str, list[ChatMessage]]:
         errors: list[str] = []
         if messages_override:
@@ -218,6 +221,7 @@ class AnalysisService:
                 provider=provider,
                 model=model,
                 prompt_version=prompt_version,
+                prompt_language=prompt_language,
             )
         raw_text: str | None = None
 

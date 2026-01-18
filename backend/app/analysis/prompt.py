@@ -1,14 +1,50 @@
 from __future__ import annotations
 
 import json
-import textwrap
 from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 
 from app.analysis.models import FeedResponse
 from app.analysis.schema import AnalysisConstraints, ProviderName
+from app.errors import ApiError
+
+
+_PROMPT_DIR = Path(__file__).with_name("prompts")
+_ALLOWED_LANG = {"en", "zh"}
+
+
+@lru_cache(maxsize=16)
+def _load_prompt_template(version: str, language: str) -> str:
+    safe_version = (version or "v1").strip()
+    safe_lang = (language or "en").strip().lower()
+    if safe_lang not in _ALLOWED_LANG:
+        safe_lang = "en"
+    path = _PROMPT_DIR / f"{safe_version}.{safe_lang}.txt"
+    if not path.exists():
+        fallback = _PROMPT_DIR / f"{safe_version}.en.txt"
+        if safe_lang != "en" and fallback.exists():
+            path = fallback
+        else:
+            raise ApiError(
+                status_code=500,
+                error="config_error",
+                message="Prompt file not found.",
+                details={"version": safe_version, "language": safe_lang},
+            )
+    text = path.read_text(encoding="utf-8").strip()
+    print(text)
+    if not text:
+        raise ApiError(
+            status_code=500,
+            error="config_error",
+            message="Prompt file is empty.",
+            details={"path": str(path)},
+        )
+    return text
 
 
 def _dump_model(model: Any) -> Any:
@@ -30,45 +66,26 @@ def build_messages(
     provider: ProviderName,
     model: str,
     prompt_version: str,
+    prompt_language: str = "en",
     previous_errors: list[str] | None = None,
     last_output: str | None = None,
 ) -> list[dict[str, str]]:
     max_orders = constraints.maxOrders or 3
-    system_prompt = textwrap.dedent(
-        f"""
-        You are a trading research assistant. Based only on the provided feed and constraints, output actionable next steps.
-        Return STRICT JSON only; no Markdown or prose. The JSON schema is:
-        meta: {{
-          asOf: ISO datetime in UTC,
-          provider: "{provider}",
-          model: "{model}",
-          promptVersion: "{prompt_version}",
-          feedMeta: copy feed.meta and any helpful notes about data coverage
-        }}
-        summary: one-line overview (<= 280 chars).
-        actions: array (max {max_orders}) of {{
-          ticker: string (must be in feed.tradableTickers),
-          action: BUY | SELL | HOLD | REDUCE | INCREASE,
-          timeframe: one of feed.ohlcv keys (10D_1h or 6M_1d),
-          qty: number | null,
-          targetWeight: number | null,
-          deltaWeight: number | null,
-          rationale: brief fact-based reason citing visible bars/trends,
-          risk: stop conditions or key risks,
-          confidence: 0-1
-        }}
-        doNotTradeIf: array of strings listing blocking conditions (e.g., no cash, missing data).
-        conversation: array of natural-language turns for UX display (only user/assistant roles, skip system).
-
-        Rules:
-        - Limit actions to {max_orders}. Prefer weight-based sizing when cash is unknown.
-        - Respect constraints: allowBuy/allowSell/allowShort; if a direction is disallowed, omit those actions.
-        - Use facts from feed.ohlcv only; do not invent prices. If data is stale or missing, add a doNotTradeIf entry.
-        - If no clear edge, return actions=[] and a concise summary explaining hold/observe stance.
-        - Keep JSON valid and machine-readable; avoid code fences.
-        - In conversation, explain reasoning/changes succinctly; keep it 1-3 short sentences per assistant turn.
-        """
-    ).strip()
+    template = _load_prompt_template(prompt_version, prompt_language)
+    try:
+        system_prompt = template.format(
+            provider=provider,
+            model=model,
+            prompt_version=prompt_version,
+            max_orders=max_orders,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(
+            status_code=500,
+            error="config_error",
+            message="Failed to format prompt template.",
+            details={"error": str(exc)},
+        ) from exc
 
     payload = {
         "feed": _dump_model(feed),

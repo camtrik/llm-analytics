@@ -10,6 +10,7 @@ from app.analysis.models import FeedRequest, FeedResponse
 
 
 ProviderName = Literal["gpt", "deepseek"]
+PromptLanguage = Literal["en", "zh"]
 
 
 class ChatMessage(BaseModel):
@@ -52,6 +53,7 @@ class AnalysisRunRequest(BaseModel):
     feedRef: FeedRef | None = None
     constraints: AnalysisConstraints | None = None
     promptVersion: str = "v1"
+    promptLanguage: PromptLanguage = "en"
 
     @model_validator(mode="after")
     def _require_feed(self) -> "AnalysisRunRequest":

@@ -178,6 +178,8 @@ type AnalysisTurn = {
   messages?: ChatMessage[] | null;
 };
 
+type PromptLanguage = "en" | "zh";
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -258,6 +260,7 @@ export default function DisplayPage() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providersLoading, setProvidersLoading] = useState(true);
   const [selectedProvider, setSelectedProvider] = useState<string>("");
+  const [promptLanguage, setPromptLanguage] = useState<PromptLanguage>("en");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisRaw, setAnalysisRaw] = useState<string | null>(null);
   const [analysisRunId, setAnalysisRunId] = useState<number | null>(null);
@@ -590,6 +593,7 @@ export default function DisplayPage() {
           tradableTickers: selectedTickers,
           includePositions: true,
         },
+        promptLanguage,
         constraints: {
           cash: Number.isFinite(cashValue) ? cashValue : 1000000,
         },
@@ -976,6 +980,16 @@ export default function DisplayPage() {
                       {item.name} ({item.defaultModel})
                     </option>
                   ))}
+                </select>
+                <select
+                  value={promptLanguage}
+                  onChange={(event) =>
+                    setPromptLanguage((event.target.value as PromptLanguage) || "en")
+                  }
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                >
+                  <option value="en">Prompt: English</option>
+                  <option value="zh">Prompt: 中文</option>
                 </select>
                 <div className="flex items-center gap-2 text-xs text-slate-600">
                   <label className="text-xs font-medium text-slate-700">
