@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 import pandas as pd
+from backtesting import Backtest
 
 from app.config.data_config import ALL_TICKERS
-from app.config.timeframes import TIMEFRAME_COMBOS, Timeframe
+from app.config.timeframes import Timeframe
 from app.data.market_cache import MarketCache
 from app.data.models import Bar
 from app.errors import ApiError
@@ -22,6 +23,8 @@ from app.quant.schema import (
     Signal,
     StrategySpec,
 )
+from app.quant.strategies.ma_crossover import MaCrossoverStrategy
+from app.quant.strategies.rsi_reversal import RsiReversalStrategy, compute_rsi_series
 
 
 @dataclass(frozen=True)
@@ -106,15 +109,73 @@ def _run_strategy_on_bars(
         )
     name = strategy.name
     params = strategy.params or {}
+    fee_rate = fees_bps / 10_000.0
+
     if name == "ma_crossover":
         fast = int(params.get("fast", 10))
         slow = int(params.get("slow", 30))
-        return _ma_crossover(df, fast=fast, slow=slow, fees_bps=fees_bps, initial_cash=initial_cash, include_equity=include_equity_curve)
+        if slow <= fast:
+            raise ApiError(
+                status_code=400,
+                error="invalid_request",
+                message="slow must be greater than fast.",
+                details={"fast": fast, "slow": slow},
+            )
+        if len(df) < slow + 2:
+            raise ApiError(
+                status_code=400,
+                error="invalid_request",
+                message="Not enough bars for MA crossover.",
+                details={"required": slow + 2, "actual": len(df)},
+            )
+        bt = Backtest(
+            df,
+            MaCrossoverStrategy,
+            cash=initial_cash,
+            commission=fee_rate,
+            exclusive_orders=True,
+        )
+        stats = bt.run(fast=fast, slow=slow)
+        return _build_result_from_stats(
+            df=df,
+            stats=stats,
+            signal=_ma_signal(df, fast, slow),
+            include_equity_curve=include_equity_curve,
+            initial_cash=initial_cash,
+        )
     if name == "rsi_reversal":
         length = int(params.get("length", 14))
         lower = float(params.get("lower", 30))
         upper = float(params.get("upper", 70))
-        return _rsi_reversal(df, length=length, lower=lower, upper=upper, fees_bps=fees_bps, initial_cash=initial_cash, include_equity=include_equity_curve)
+        if length < 2:
+            raise ApiError(
+                status_code=400,
+                error="invalid_request",
+                message="length must be >= 2",
+                details={"length": length},
+            )
+        if len(df) < length + 2:
+            raise ApiError(
+                status_code=400,
+                error="invalid_request",
+                message="Not enough bars for RSI.",
+                details={"required": length + 2, "actual": len(df)},
+            )
+        bt = Backtest(
+            df,
+            RsiReversalStrategy,
+            cash=initial_cash,
+            commission=fee_rate,
+            exclusive_orders=True,
+        )
+        stats = bt.run(length=length, lower=lower, upper=upper)
+        return _build_result_from_stats(
+            df=df,
+            stats=stats,
+            signal=_rsi_signal(df, length, lower, upper),
+            include_equity_curve=include_equity_curve,
+            initial_cash=initial_cash,
+        )
     raise ApiError(
         status_code=400,
         error="invalid_request",
@@ -131,7 +192,6 @@ def _bars_to_df(bars: Iterable[Bar]) -> pd.DataFrame:
             continue
         records.append(
             {
-                "ts": ts,
                 "time": datetime.fromtimestamp(ts, tz=timezone.utc),
                 "Open": float(bar.get("o", 0.0)),
                 "High": float(bar.get("h", 0.0)),
@@ -142,7 +202,7 @@ def _bars_to_df(bars: Iterable[Bar]) -> pd.DataFrame:
         )
     if not records:
         return pd.DataFrame()
-    df = pd.DataFrame(records).sort_values("ts")
+    df = pd.DataFrame(records).sort_values("time")
     df = df.set_index("time")
     return df
 
@@ -161,227 +221,111 @@ def _extract_ts(bar: Bar) -> int | None:
     return None
 
 
-def _ma_crossover(
+def _build_result_from_stats(
     df: pd.DataFrame,
-    fast: int,
-    slow: int,
-    fees_bps: float,
+    stats: pd.Series,
+    signal: Action,
+    include_equity_curve: bool,
     initial_cash: float,
-    include_equity: bool,
 ) -> StrategyResult:
-    if slow <= fast:
-        raise ApiError(
-            status_code=400,
-            error="invalid_request",
-            message="slow must be greater than fast.",
-            details={"fast": fast, "slow": slow},
-        )
-    if len(df) < slow + 2:
-        raise ApiError(
-            status_code=400,
-            error="invalid_request",
-            message="Not enough bars for MA crossover.",
-            details={"required": slow + 2, "actual": len(df)},
-        )
-    close = df["Close"]
-    fast_ma = close.rolling(fast, min_periods=fast).mean()
-    slow_ma = close.rolling(slow, min_periods=slow).mean()
+    # backtesting==0.6.5 uses percent-based metrics with explicit [%] suffix.
+    total_return = _safe_float(stats, "Return [%]") / 100.0
+    max_dd = abs(_safe_float(stats, "Max. Drawdown [%]")) / 100.0
+    trade_count = int(stats.get("# Trades", 0) or 0)
+    trades_df = stats.get("_trades")
+    win_rate = _compute_win_rate(trades_df)
+    avg_hold = _compute_avg_hold_bars(trades_df)
+    if win_rate is None:
+        win_rate_val = stats.get("Win Rate [%]", None)
+        win_rate = float(win_rate_val) / 100.0 if win_rate_val is not None else None
+    if avg_hold is None:
+        avg_hold = stats.get("Average Trade Duration", None)
+        if avg_hold is not None:
+            try:
+                avg_hold = float(avg_hold)
+            except (TypeError, ValueError):
+                avg_hold = None
 
-    position = 0  # 0 cash, 1 long
-    cash = initial_cash
-    shares = 0.0
-    equity_curve: list[EquityPoint] = []
-    trades: list[tuple[float, float, int]] = []  # (entry_price, exit_price, bars_held)
-    last_entry_idx: int | None = None
-    fee_rate = fees_bps / 10_000.0
+    equity_curve: list[EquityPoint] | None = None
+    if include_equity_curve:
+        curve_df = stats.get("_equity_curve")
+        if isinstance(curve_df, pd.DataFrame) and "Equity" in curve_df.columns:
+            equity_curve = [
+                EquityPoint(t=int(idx.timestamp()), equity=float(row["Equity"]))
+                for idx, row in curve_df.iterrows()
+            ]
 
-    for idx, price in enumerate(close):
-        # record equity at start of bar
-        equity_curve.append(
-            EquityPoint(
-                t=int(df.index[idx].timestamp()),
-                equity=float(cash + shares * price),
-            )
-        )
-        # skip until both MAs available
-        if pd.isna(fast_ma.iloc[idx]) or pd.isna(slow_ma.iloc[idx]):
-            continue
-
-        if position == 0 and fast_ma.iloc[idx] > slow_ma.iloc[idx]:
-            # enter long with full cash
-            amount = cash
-            if amount <= 0:
-                continue
-            fee = amount * fee_rate
-            cash -= amount
-            shares = (amount - fee) / price if price > 0 else 0.0
-            position = 1
-            last_entry_idx = idx
-        elif position == 1 and fast_ma.iloc[idx] < slow_ma.iloc[idx]:
-            # exit to cash
-            proceeds = shares * price
-            fee = proceeds * fee_rate
-            cash = proceeds - fee
-            position = 0
-            if last_entry_idx is not None:
-                entry_price = close.iloc[last_entry_idx]
-                trades.append((float(entry_price), float(price), idx - last_entry_idx))
-            shares = 0.0
-            last_entry_idx = None
-
-    # finalize equity at last bar close
-    final_equity = cash + shares * close.iloc[-1]
-    equity_curve.append(
-        EquityPoint(
-            t=int(df.index[-1].timestamp()),
-            equity=float(final_equity),
-        )
-    )
-
-    action: Action = "HOLD"
-    if fast_ma.iloc[-1] > slow_ma.iloc[-1]:
-        action = "BUY"
-    elif fast_ma.iloc[-1] < slow_ma.iloc[-1]:
-        action = "SELL"
-
-    metrics = _compute_metrics(equity_curve, trades, initial_cash)
-    return StrategyResult(
-        signal=action,
-        as_of=df.index[-1],
-        metrics=metrics,
-        equity_curve=equity_curve if include_equity else None,
-    )
-
-
-def _rsi_reversal(
-    df: pd.DataFrame,
-    length: int,
-    lower: float,
-    upper: float,
-    fees_bps: float,
-    initial_cash: float,
-    include_equity: bool,
-) -> StrategyResult:
-    if length < 2:
-        raise ApiError(
-            status_code=400,
-            error="invalid_request",
-            message="length must be >= 2",
-            details={"length": length},
-        )
-    close = df["Close"]
-    if len(close) < length + 2:
-        raise ApiError(
-            status_code=400,
-            error="invalid_request",
-            message="Not enough bars for RSI.",
-            details={"required": length + 2, "actual": len(close)},
-        )
-
-    rsi = _compute_rsi(close, length)
-    position = 0
-    cash = initial_cash
-    shares = 0.0
-    equity_curve: list[EquityPoint] = []
-    trades: list[tuple[float, float, int]] = []
-    last_entry_idx: int | None = None
-    fee_rate = fees_bps / 10_000.0
-
-    for idx, price in enumerate(close):
-        equity_curve.append(
-            EquityPoint(
-                t=int(df.index[idx].timestamp()),
-                equity=float(cash + shares * price),
-            )
-        )
-        if pd.isna(rsi.iloc[idx]):
-            continue
-        if position == 0 and rsi.iloc[idx] < lower:
-            amount = cash
-            if amount <= 0:
-                continue
-            fee = amount * fee_rate
-            cash -= amount
-            shares = (amount - fee) / price if price > 0 else 0.0
-            position = 1
-            last_entry_idx = idx
-        elif position == 1 and rsi.iloc[idx] > upper:
-            proceeds = shares * price
-            fee = proceeds * fee_rate
-            cash = proceeds - fee
-            position = 0
-            if last_entry_idx is not None:
-                entry_price = close.iloc[last_entry_idx]
-                trades.append((float(entry_price), float(price), idx - last_entry_idx))
-            shares = 0.0
-            last_entry_idx = None
-
-    final_equity = cash + shares * close.iloc[-1]
-    equity_curve.append(
-        EquityPoint(
-            t=int(df.index[-1].timestamp()),
-            equity=float(final_equity),
-        )
-    )
-
-    action: Action = "HOLD"
-    if rsi.iloc[-1] < lower:
-        action = "BUY"
-    elif rsi.iloc[-1] > upper:
-        action = "SELL"
-
-    metrics = _compute_metrics(equity_curve, trades, initial_cash)
-    return StrategyResult(
-        signal=action,
-        as_of=df.index[-1],
-        metrics=metrics,
-        equity_curve=equity_curve if include_equity else None,
-    )
-
-
-def _compute_rsi(series: pd.Series, length: int) -> pd.Series:
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.ewm(alpha=1 / length, min_periods=length, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / length, min_periods=length, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, pd.NA)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-
-def _compute_metrics(
-    equity: list[EquityPoint],
-    trades: list[tuple[float, float, int]],
-    initial_cash: float,
-) -> Metrics:
-    equities = [pt.equity for pt in equity]
-    if not equities:
-        return Metrics(
-            totalReturn=0.0,
-            maxDrawdown=0.0,
-            tradeCount=len(trades),
-            winRate=None,
-            avgHoldBars=None,
-        )
-    peak = equities[0]
-    max_dd = 0.0
-    for value in equities:
-        peak = max(peak, value)
-        if peak > 0:
-            max_dd = max(max_dd, (peak - value) / peak)
-    total_return = (equities[-1] / initial_cash) - 1 if initial_cash else 0.0
-
-    win_rate = None
-    avg_hold = None
-    if trades:
-        wins = sum(1 for entry, exit, _ in trades if exit > entry)
-        win_rate = wins / len(trades)
-        avg_hold = sum(hold for _, _, hold in trades) / len(trades)
-    return Metrics(
+    metrics = Metrics(
         totalReturn=total_return,
         maxDrawdown=max_dd,
-        tradeCount=len(trades),
+        tradeCount=trade_count,
         winRate=win_rate,
         avgHoldBars=avg_hold,
     )
+    return StrategyResult(
+        signal=signal,
+        as_of=df.index[-1],
+        metrics=metrics,
+        equity_curve=equity_curve,
+    )
+
+
+def _safe_float(stats: pd.Series, key: str) -> float:
+    try:
+        val = stats.get(key, 0.0)
+        return float(val) if val is not None else 0.0
+    except Exception:
+        return 0.0
+
+
+def _ma_signal(df: pd.DataFrame, fast: int, slow: int) -> Action:
+    fast_ma = df["Close"].rolling(fast, min_periods=fast).mean()
+    slow_ma = df["Close"].rolling(slow, min_periods=slow).mean()
+    if fast_ma.iloc[-1] > slow_ma.iloc[-1]:
+        return "BUY"
+    if fast_ma.iloc[-1] < slow_ma.iloc[-1]:
+        return "SELL"
+    return "HOLD"
+
+
+def _rsi_signal(df: pd.DataFrame, length: int, lower: float, upper: float) -> Action:
+    rsi = compute_rsi_series(df["Close"], length)
+    latest = rsi.iloc[-1]
+    if pd.isna(latest):
+        return "HOLD"
+    if latest < lower:
+        return "BUY"
+    if latest > upper:
+        return "SELL"
+    return "HOLD"
+
+
+def _compute_win_rate(trades_df: pd.DataFrame | None) -> float | None:
+    if trades_df is None or trades_df.empty:
+        return None
+    col = None
+    for candidate in ("ReturnPct", "Return [%]", "PnL"):
+        if candidate in trades_df.columns:
+            col = candidate
+            break
+    if col is None:
+        return None
+    returns = trades_df[col]
+    try:
+        wins = returns > 0
+        return float(wins.mean())
+    except Exception:
+        return None
+
+
+def _compute_avg_hold_bars(trades_df: pd.DataFrame | None) -> float | None:
+    if trades_df is None or trades_df.empty:
+        return None
+    for start_col, end_col in (("EntryBar", "ExitBar"), ("Entry Index", "Exit Index")):
+        if start_col in trades_df.columns and end_col in trades_df.columns:
+            try:
+                spans = trades_df[end_col] - trades_df[start_col]
+                return float(spans.mean())
+            except Exception:
+                continue
+    return None
