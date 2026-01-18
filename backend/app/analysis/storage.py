@@ -12,6 +12,7 @@ from app.analysis.models import FeedResponse
 from app.analysis.schema import (
     ChatMessage,
     AnalysisConstraints,
+    AnalysisTurn,
     AnalysisHistoryItem,
     AnalysisHistoryResponse,
     AnalysisRecord,
@@ -70,6 +71,7 @@ class AnalysisStore:
                     constraints_json TEXT,
                     result_json TEXT,
                     raw_text TEXT,
+                    turns_json TEXT,
                     messages_json TEXT,
                     status TEXT NOT NULL,
                     error TEXT
@@ -83,6 +85,8 @@ class AnalysisStore:
             }
             if "messages_json" not in existing:
                 conn.execute("ALTER TABLE analysis_runs ADD COLUMN messages_json TEXT;")
+            if "turns_json" not in existing:
+                conn.execute("ALTER TABLE analysis_runs ADD COLUMN turns_json TEXT;")
             conn.commit()
 
     def create_run(
@@ -93,18 +97,20 @@ class AnalysisStore:
         feed: FeedResponse,
         constraints: AnalysisConstraints | None,
         messages: list[ChatMessage] | None = None,
+        turns: list[AnalysisTurn] | None = None,
     ) -> int:
         created_at = datetime.now(timezone.utc).isoformat()
         feed_json = _json_dumps(_model_dump(feed))
         constraints_json = _json_dumps(_model_dump(constraints)) if constraints else None
         messages_json = _json_dumps(_model_dump(messages)) if messages else None
+        turns_json = _json_dumps(_model_dump(turns)) if turns else None
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO analysis_runs (
                     created_at, provider, model, prompt_version, feed_json,
-                    constraints_json, messages_json, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    constraints_json, messages_json, turns_json, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     created_at,
@@ -114,6 +120,7 @@ class AnalysisStore:
                     feed_json,
                     constraints_json,
                     messages_json,
+                    turns_json,
                     "running",
                 ),
             )
@@ -126,30 +133,40 @@ class AnalysisStore:
         result: AnalysisResult,
         raw_text: str | None,
         messages: list[ChatMessage] | None,
+        turns: list[AnalysisTurn] | None,
     ) -> None:
         result_json = _json_dumps(_model_dump(result))
         messages_json = _json_dumps(_model_dump(messages)) if messages else None
+        turns_json = _json_dumps(_model_dump(turns)) if turns else None
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE analysis_runs
-                SET result_json = ?, raw_text = ?, messages_json = ?, status = ?
+                SET result_json = ?, raw_text = ?, messages_json = ?, turns_json = ?, status = ?
                 WHERE id = ?;
                 """,
-                (result_json, raw_text, messages_json, "succeeded", run_id),
+                (result_json, raw_text, messages_json, turns_json, "succeeded", run_id),
             )
             conn.commit()
 
-    def fail_run(self, run_id: int, error: str, messages: list[ChatMessage] | None = None) -> None:
+    def fail_run(
+        self,
+        run_id: int,
+        error: str,
+        messages: list[ChatMessage] | None = None,
+        turns: list[AnalysisTurn] | None = None,
+    ) -> None:
         messages_json = _json_dumps(_model_dump(messages)) if messages else None
+        turns_json = _json_dumps(_model_dump(turns)) if turns else None
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE analysis_runs
-                SET status = ?, error = ?, messages_json = COALESCE(messages_json, ?)
+                SET status = ?, error = ?, messages_json = COALESCE(messages_json, ?),
+                    turns_json = COALESCE(turns_json, ?)
                 WHERE id = ?;
                 """,
-                ("failed", error, messages_json, run_id),
+                ("failed", error, messages_json, turns_json, run_id),
             )
             conn.commit()
 
@@ -159,7 +176,7 @@ class AnalysisStore:
                 """
                 SELECT id, created_at, provider, model, prompt_version,
                        feed_json, constraints_json, result_json, raw_text,
-                       messages_json,
+                       messages_json, turns_json,
                        status, error
                 FROM analysis_runs
                 WHERE id = ?;
@@ -173,6 +190,7 @@ class AnalysisStore:
         constraints = self._decode_constraints(row["constraints_json"])
         result = self._decode_result(row["result_json"])
         messages = self._decode_messages(row["messages_json"])
+        turns = self._decode_turns(row["turns_json"])
         return AnalysisRecord(
             id=int(row["id"]),
             createdAt=_parse_datetime(row["created_at"]),
@@ -184,6 +202,7 @@ class AnalysisStore:
             result=result,
             raw=row["raw_text"],
             messages=messages,
+            turns=turns,
             status=row["status"],
             error=row["error"],
         )
@@ -273,6 +292,26 @@ class AnalysisStore:
             if isinstance(role, str) and isinstance(content, str):
                 messages.append(ChatMessage(role=role, content=content))  # type: ignore[arg-type]
         return messages or None
+
+    def _decode_turns(self, payload: str | None) -> list[AnalysisTurn] | None:
+        if not payload:
+            return None
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, list):
+            return None
+        turns: list[AnalysisTurn] = []
+        for item in data:
+            try:
+                if hasattr(AnalysisTurn, "model_validate"):
+                    turns.append(AnalysisTurn.model_validate(item))
+                else:
+                    turns.append(AnalysisTurn.parse_obj(item))
+            except Exception:
+                continue
+        return turns or None
 
 
 _settings = load_settings()

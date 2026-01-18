@@ -58,6 +58,7 @@ def build_messages(
           confidence: 0-1
         }}
         doNotTradeIf: array of strings listing blocking conditions (e.g., no cash, missing data).
+        conversation: array of natural-language turns for UX display (only user/assistant roles, skip system).
 
         Rules:
         - Limit actions to {max_orders}. Prefer weight-based sizing when cash is unknown.
@@ -65,6 +66,7 @@ def build_messages(
         - Use facts from feed.ohlcv only; do not invent prices. If data is stale or missing, add a doNotTradeIf entry.
         - If no clear edge, return actions=[] and a concise summary explaining hold/observe stance.
         - Keep JSON valid and machine-readable; avoid code fences.
+        - In conversation, explain reasoning/changes succinctly; keep it 1-3 short sentences per assistant turn.
         """
     ).strip()
 

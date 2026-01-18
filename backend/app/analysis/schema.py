@@ -17,6 +17,11 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ConversationEntry(BaseModel):
+    role: Literal["assistant", "user"]
+    content: str
+
+
 class AnalysisConstraints(BaseModel):
     cash: float | None = Field(
         None, description="Available cash. If unknown, prefer weight-based sizing."
@@ -90,6 +95,15 @@ class AnalysisResult(BaseModel):
     summary: str
     actions: list[AnalysisAction] = Field(default_factory=list)
     doNotTradeIf: list[str] = Field(default_factory=list)
+    conversation: list[ConversationEntry] = Field(default_factory=list)
+
+
+class AnalysisTurn(BaseModel):
+    index: int
+    createdAt: datetime
+    result: AnalysisResult
+    raw: str | None = None
+    messages: list[ChatMessage] | None = None
 
 
 class AnalysisRunResponse(BaseModel):
@@ -99,6 +113,7 @@ class AnalysisRunResponse(BaseModel):
     messages: list[ChatMessage] | None = None
     feed: FeedResponse | None = None
     constraints: AnalysisConstraints | None = None
+    turns: list[AnalysisTurn] | None = None
 
 
 class AnalysisContinueRequest(BaseModel):
@@ -111,6 +126,7 @@ class AnalysisContinueResponse(BaseModel):
     result: AnalysisResult
     raw: str | None = None
     messages: list[ChatMessage] | None = None
+    turns: list[AnalysisTurn] | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -152,6 +168,7 @@ class AnalysisRecord(BaseModel):
     result: AnalysisResult | None = None
     raw: str | None = None
     messages: list[ChatMessage] | None = None
+    turns: list[AnalysisTurn] | None = None
     status: str
     error: str | None = None
 

@@ -84,6 +84,11 @@ type ProvidersResponse = {
   defaultProvider: string;
 };
 
+type ConversationEntry = {
+  role: "assistant" | "user";
+  content: string;
+};
+
 type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -112,6 +117,7 @@ type AnalysisResult = {
   summary: string;
   actions: AnalysisAction[];
   doNotTradeIf: string[];
+  conversation?: ConversationEntry[];
 };
 
 type AnalysisRunResponse = {
@@ -131,6 +137,7 @@ type AnalysisRunResponse = {
     slippageBps?: number | null;
     riskBudget?: number | null;
   } | null;
+  turns?: AnalysisTurn[] | null;
 };
 
 type AnalysisRecordResponse = {
@@ -144,6 +151,7 @@ type AnalysisRecordResponse = {
   result?: AnalysisResult | null;
   raw?: string | null;
   messages?: ChatMessage[] | null;
+  turns?: AnalysisTurn[] | null;
 };
 
 type AnalysisHistoryItem = {
@@ -160,6 +168,14 @@ type AnalysisHistoryItem = {
 
 type AnalysisHistoryResponse = {
   items: AnalysisHistoryItem[];
+};
+
+type AnalysisTurn = {
+  index: number;
+  createdAt: string;
+  result: AnalysisResult;
+  raw?: string | null;
+  messages?: ChatMessage[] | null;
 };
 
 async function safeParseError(res: Response) {
@@ -248,6 +264,8 @@ export default function DisplayPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [cashInput, setCashInput] = useState<string>("1000000");
+  const [turns, setTurns] = useState<AnalysisTurn[]>([]);
+  const [turnIndex, setTurnIndex] = useState<number>(0);
   const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -340,6 +358,8 @@ export default function DisplayPage() {
     setAnalysisError(null);
     setChatMessages([]);
     setChatInput("");
+    setTurns([]);
+    setTurnIndex(0);
   }, [selectedTickers]);
 
   const filteredTickers = useMemo(() => {
@@ -375,6 +395,9 @@ export default function DisplayPage() {
       return analysisResult;
     }
   }, [analysisRaw, analysisResult]);
+
+  const currentTurn = turns[turnIndex] || null;
+  const currentResult = currentTurn?.result || analysisResult;
 
   const toggleTicker = (ticker: string) => {
     setSelectedTickers((prev) => {
@@ -582,6 +605,9 @@ export default function DisplayPage() {
         throw new Error(detail);
       }
       const data = (await res.json()) as AnalysisRunResponse;
+      const turnsResp = data.turns || [];
+      setTurns(turnsResp);
+      setTurnIndex(turnsResp.length ? turnsResp.length - 1 : 0);
       setAnalysisResult(data.result);
       setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
       setAnalysisRunId(data.id);
@@ -629,6 +655,9 @@ export default function DisplayPage() {
       }
       const data = (await res.json()) as AnalysisRecordResponse;
       if (data.result) {
+        const turnsResp = data.turns || [];
+        setTurns(turnsResp);
+        setTurnIndex(turnsResp.length ? turnsResp.length - 1 : 0);
         setAnalysisResult(data.result);
         setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
         setAnalysisRunId(data.id);
@@ -666,6 +695,9 @@ export default function DisplayPage() {
         throw new Error(detail);
       }
       const data = (await res.json()) as AnalysisRunResponse;
+      const turnsResp = data.turns || [];
+      setTurns(turnsResp);
+      setTurnIndex(turnsResp.length ? turnsResp.length - 1 : 0);
       setAnalysisResult(data.result);
       setAnalysisRaw(data.raw ?? JSON.stringify(data.result, null, 2));
       setChatMessages(data.messages || []);
@@ -1019,7 +1051,7 @@ export default function DisplayPage() {
               </div>
             )}
 
-            {analysisView === "result" && analysisResult && (
+            {analysisView === "result" && currentResult && (
               <div className="mt-5 space-y-4">
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1028,17 +1060,17 @@ export default function DisplayPage() {
                         Summary
                       </div>
                       <p className="mt-1 text-sm text-slate-700">
-                        {analysisResult.summary}
+                        {currentResult.summary}
                       </p>
                     </div>
                     <div className="text-right text-xs text-slate-500">
                       <div>ID: #{analysisRunId ?? "-"}</div>
                       <div>
-                        As of: {formatIsoDatetime(analysisResult.meta.asOf)}
+                        As of: {formatIsoDatetime(currentResult.meta.asOf)}
                       </div>
-                      <div>Provider: {analysisResult.meta.provider}</div>
-                      <div>Model: {analysisResult.meta.model}</div>
-                      <div>Prompt: {analysisResult.meta.promptVersion}</div>
+                      <div>Provider: {currentResult.meta.provider}</div>
+                      <div>Model: {currentResult.meta.model}</div>
+                      <div>Prompt: {currentResult.meta.promptVersion}</div>
                     </div>
                   </div>
                 </div>
@@ -1049,12 +1081,12 @@ export default function DisplayPage() {
                       Actions
                     </h4>
                     <span className="text-xs text-slate-500">
-                      {analysisResult.actions.length} 项
+                      {currentResult?.actions.length || 0} 项
                     </span>
                   </div>
-                  {analysisResult.actions.length ? (
+                  {currentResult?.actions.length ? (
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {analysisResult.actions.map((action, index) => (
+                      {currentResult.actions.map((action, index) => (
                         <div
                           key={`${action.ticker}-${index}`}
                           className="rounded-lg border border-slate-200 bg-slate-50 p-3"
@@ -1097,16 +1129,16 @@ export default function DisplayPage() {
                   )}
                 </div>
 
-                {analysisResult.doNotTradeIf.length > 0 && (
+                {currentResult?.doNotTradeIf.length ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
                     <div className="font-semibold">Do not trade if</div>
                     <ul className="mt-2 list-disc space-y-1 pl-5">
-                      {analysisResult.doNotTradeIf.map((item, index) => (
+                      {currentResult.doNotTradeIf.map((item, index) => (
                         <li key={`${item}-${index}`}>{item}</li>
                       ))}
                     </ul>
                   </div>
-                )}
+                ) : null}
 
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex items-center justify-between">
@@ -1127,21 +1159,25 @@ export default function DisplayPage() {
                       className="max-h-72 space-y-2 overflow-auto rounded-lg border border-slate-100 p-3"
                       ref={chatContainerRef}
                     >
-                      {chatMessages
-                        .filter((msg) => msg.role !== "system")
-                        .map((msg, index) => (
-                          <div
-                            key={`${msg.role}-${index}`}
-                            className={`text-sm ${
-                              msg.role === "assistant" ? "text-slate-800" : "text-slate-600"
-                            }`}
-                          >
-                            <span className="mr-2 text-xs font-semibold uppercase text-slate-500">
-                              {msg.role}
-                            </span>
-                            <span className="whitespace-pre-wrap">{msg.content}</span>
-                          </div>
-                        ))}
+                      {(currentResult?.conversation?.length
+                        ? currentResult.conversation.map((entry) => ({
+                            role: entry.role,
+                            content: entry.content,
+                          }))
+                        : chatMessages.filter((msg) => msg.role !== "system")
+                      ).map((msg, index) => (
+                        <div
+                          key={`${msg.role}-${index}`}
+                          className={`text-sm ${
+                            msg.role === "assistant" ? "text-slate-800" : "text-slate-600"
+                          }`}
+                        >
+                          <span className="mr-2 text-xs font-semibold uppercase text-slate-500">
+                            {msg.role}
+                          </span>
+                          <span className="whitespace-pre-wrap">{msg.content}</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                   <div className="mt-2 flex flex-col gap-2">
@@ -1235,12 +1271,41 @@ export default function DisplayPage() {
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-700">
-                    Raw JSON
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <span>Raw JSON</span>
+                    {turns.length > 1 && (
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                        <button
+                          type="button"
+                          onClick={() => setTurnIndex((prev) => Math.max(0, prev - 1))}
+                          disabled={turnIndex === 0}
+                          className="rounded border border-slate-200 px-2 py-1 disabled:opacity-60"
+                        >
+                          ←
+                        </button>
+                        <span>
+                          {turnIndex + 1}/{turns.length}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTurnIndex((prev) => Math.min(turns.length - 1, prev + 1))
+                          }
+                          disabled={turnIndex >= turns.length - 1}
+                          className="rounded border border-slate-200 px-2 py-1 disabled:opacity-60"
+                        >
+                          →
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-2 max-h-64 overflow-auto rounded-lg border border-slate-100">
                     <JsonView
-                      value={parsedAnalysisRaw || analysisResult || {}}
+                      value={
+                        turns.length
+                          ? turns[turnIndex]?.result || {}
+                          : parsedAnalysisRaw || analysisResult || {}
+                      }
                       collapsed={2}
                       displayDataTypes={false}
                       displayObjectSize={false}
@@ -1253,7 +1318,7 @@ export default function DisplayPage() {
               </div>
             )}
 
-            {analysisView === "result" && !analysisResult && !analysisLoading && (
+            {analysisView === "result" && !currentResult && !analysisLoading && (
               <div className="mt-4 text-xs text-slate-500">
                 {cacheReady
                   ? "生成 feed 后点击 Analyze 运行一次模型。"

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from datetime import datetime, timezone
+
 from app.analysis.feed import build_feed
 from app.analysis.models import FeedResponse
 from app.analysis.prompt import build_messages
@@ -54,6 +56,7 @@ class AnalysisService:
                 message="Model is required for analysis.",
             )
 
+        created_at = datetime.now(timezone.utc)
         run_id = self._store.create_run(
             provider=payload.provider,
             model=model,
@@ -61,6 +64,7 @@ class AnalysisService:
             feed=feed,
             constraints=constraints,
             messages=None,
+            turns=None,
         )
 
         try:
@@ -73,7 +77,16 @@ class AnalysisService:
                 prompt_version=payload.promptVersion,
                 messages_override=None,
             )
-            self._store.complete_run(run_id, result, raw_text, messages_used)
+            turns = [
+                self._build_turn(
+                    index=0,
+                    created_at=created_at,
+                    result=result,
+                    raw=raw_text,
+                    messages=messages_used,
+                )
+            ]
+            self._store.complete_run(run_id, result, raw_text, messages_used, turns)
             return AnalysisRunResponse(
                 id=run_id,
                 result=result,
@@ -81,6 +94,7 @@ class AnalysisService:
                 messages=messages_used,
                 feed=feed,
                 constraints=constraints,
+                turns=turns,
             )
         except ApiError as exc:
             self._store.fail_run(run_id, exc.message)
@@ -117,8 +131,13 @@ class AnalysisService:
                 error="invalid_request",
                 message="Cannot continue: no messages stored for this run.",
             )
-        messages = [msg.dict() if hasattr(msg, "dict") else {"role": msg.role, "content": msg.content} for msg in record.messages]  # type: ignore[attr-defined]
+        messages = [
+            msg.dict() if hasattr(msg, "dict") else {"role": msg.role, "content": msg.content}
+            for msg in (record.messages or [])
+        ]  # type: ignore[attr-defined]
         messages.append({"role": "user", "content": payload.userMessage})
+        created_at = datetime.now(timezone.utc)
+        turns = list(record.turns or [])
         try:
             result, raw_text, messages_used = self._invoke_model(
                 client=client,
@@ -129,18 +148,27 @@ class AnalysisService:
                 prompt_version=record.promptVersion,
                 messages_override=messages,
             )
-            self._store.complete_run(record.id, result, raw_text, messages_used)
+            new_turn = self._build_turn(
+                index=len(turns),
+                created_at=created_at,
+                result=result,
+                raw=raw_text,
+                messages=messages_used,
+            )
+            turns.append(new_turn)
+            self._store.complete_run(record.id, result, raw_text, messages_used, turns)
             return AnalysisContinueResponse(
                 id=record.id,
                 result=result,
                 raw=raw_text,
                 messages=messages_used,
+                turns=turns,
             )
         except ApiError as exc:
-            self._store.fail_run(record.id, exc.message, messages=messages)
+            self._store.fail_run(record.id, exc.message, messages=messages, turns=turns)
             raise
         except Exception as exc:  # noqa: BLE001
-            self._store.fail_run(record.id, str(exc), messages=messages)
+            self._store.fail_run(record.id, str(exc), messages=messages, turns=turns)
             raise ApiError(
                 status_code=502,
                 error="analysis_failed",
@@ -221,6 +249,24 @@ class AnalysisService:
             error="analysis_invalid_output",
             message="LLM output failed validation.",
             details={"errors": errors[-3:]},
+        )
+
+    def _build_turn(
+        self,
+        index: int,
+        created_at: datetime,
+        result: AnalysisResult,
+        raw: str | None,
+        messages: list[ChatMessage] | None,
+    ) -> "AnalysisTurn":
+        from app.analysis.schema import AnalysisTurn
+
+        return AnalysisTurn(
+            index=index,
+            createdAt=created_at,
+            result=result,
+            raw=raw,
+            messages=messages,
         )
 
     def _coerce_json(self, payload: str) -> dict[str, Any]:
