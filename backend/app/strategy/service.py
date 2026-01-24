@@ -126,11 +126,20 @@ def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackR
     screener_cfg = cfg.get("screener", {}) if isinstance(cfg.get("screener"), dict) else {}
     only_triggered_default = bool(screener_cfg.get("onlyTriggered", False))
     auto_refresh = bool(screener_cfg.get("autoRefreshIfMissing", True))
+    recent_bars_default = int(screener_cfg.get("recentBars", 3))
     only_triggered = (
         payload.onlyTriggered
         if payload.onlyTriggered is not None
         else only_triggered_default
     )
+    recent_bars = int(payload.recentBars if payload.recentBars is not None else recent_bars_default)
+    if recent_bars < 1:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="recentBars must be >= 1",
+            details={"recentBars": recent_bars},
+        )
 
     defaults = _default_tickers()
     name_map = _build_name_map(defaults)
@@ -171,6 +180,7 @@ def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackR
         screen_low_volume_pullback(
             tickers=unique_symbols,
             timeframe=timeframe,
+            recent_bars=recent_bars,
             params=params,
             cache=_cache,
         )
@@ -326,6 +336,7 @@ def low_volume_pullback_backtest(
     backtest_cfg = cfg.get("backtest", {}) if isinstance(cfg.get("backtest"), dict) else {}
     only_triggered_default = bool(backtest_cfg.get("onlyTriggered", True))
     auto_refresh = bool(backtest_cfg.get("autoRefreshIfMissing", False))
+    recent_bars_default = int(backtest_cfg.get("recentBars", 3))
     horizon_default = int(backtest_cfg.get("horizonBars", 5))
     entry_execution_default = str(backtest_cfg.get("entryExecution", "close"))
 
@@ -343,6 +354,14 @@ def low_volume_pullback_backtest(
         if payload.onlyTriggered is not None
         else only_triggered_default
     )
+    recent_bars = int(payload.recentBars if payload.recentBars is not None else recent_bars_default)
+    if recent_bars < 1:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="recentBars must be >= 1",
+            details={"recentBars": recent_bars},
+        )
 
     resolved_params_model = _resolve_params_from_config(payload.params)
     params = resolved_params_model.to_params()
@@ -376,6 +395,7 @@ def low_volume_pullback_backtest(
             df=df,
             params=params,
             cutoff_dt=cutoff_dt,
+            recent_bars=recent_bars,
             horizon_bars=horizon,
             entry_execution=entry_execution,
         )
@@ -528,14 +548,6 @@ def low_volume_pullback_backtest_range(
         )
 
     resolved_params_model = _resolve_params_from_config(payload.params)
-    user_patch = payload.params.model_dump(exclude_none=True) if payload.params else {}
-    range_params = range_cfg.get("params", {}) if isinstance(range_cfg.get("params"), dict) else {}
-    if range_params:
-        merged_params = resolved_params_model.model_dump()
-        for key, value in range_params.items():
-            if key not in user_patch:
-                merged_params[key] = value
-        resolved_params_model = LowVolumePullbackParamsModel(**merged_params)
     params = resolved_params_model.to_params()
 
     if auto_refresh:

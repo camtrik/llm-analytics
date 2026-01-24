@@ -246,7 +246,6 @@ type LowVolumeParams = {
   volRatioMax: number;
   minBodyPct: number;
   minRangePct: number | null;
-  lookbackBars: number;
   eps: number;
 };
 
@@ -477,7 +476,6 @@ export default function DisplayPage() {
   const [lvRangeHorizonBars, setLvRangeHorizonBars] = useState<string>("5");
   const [lvRangeEntryExecution, setLvRangeEntryExecution] =
     useState<LowVolumeBacktestEntryExecution>("close");
-  const [lvRangeLookback, setLvRangeLookback] = useState<string>("1");
   const [lvRangeLoading, setLvRangeLoading] = useState(false);
   const [lvRangeError, setLvRangeError] = useState<string | null>(null);
   const [lvRangeResult, setLvRangeResult] = useState<LowVolumeRangeBacktestResponse | null>(null);
@@ -971,16 +969,17 @@ export default function DisplayPage() {
     setLvResults([]);
     try {
       const volRatioMax = Number.parseFloat(lvVolRatioMax);
-      const lookbackBars = Number.parseInt(lvLookback, 10);
+      const recentBars = Number.parseInt(lvLookback, 10);
       const minBodyPct = Number.parseFloat(lvMinBodyPct);
       const payload = {
         timeframe: lvTimeframe || "6M_1d",
         tickers: null,
         onlyTriggered: lvOnlyTriggered,
+        recentBars:
+          Number.isFinite(recentBars) && recentBars >= 1 ? recentBars : 3,
         params: {
           volRatioMax: Number.isFinite(volRatioMax) ? volRatioMax : 0.5,
           minBodyPct: Number.isFinite(minBodyPct) ? minBodyPct : 0.002,
-          lookbackBars: Number.isFinite(lookbackBars) ? lookbackBars : 3,
         },
       };
       const res = await fetch(`${apiBase}/api/strategy/low_volume_pullback`, {
@@ -1011,7 +1010,7 @@ export default function DisplayPage() {
     setLvBtResult(null);
     try {
       const volRatioMax = Number.parseFloat(lvVolRatioMax);
-      const lookbackBars = Number.parseInt(lvLookback, 10);
+      const recentBars = Number.parseInt(lvLookback, 10);
       const minBodyPct = Number.parseFloat(lvMinBodyPct);
       const horizonBars = Number.parseInt(lvBtHorizonBars, 10);
       const payload = {
@@ -1020,6 +1019,8 @@ export default function DisplayPage() {
         asOfTs: null,
         tickers: null,
         onlyTriggered: lvBtOnlyTriggered,
+        recentBars:
+          Number.isFinite(recentBars) && recentBars >= 1 ? recentBars : 3,
         horizonBars:
           Number.isFinite(horizonBars) && horizonBars >= 1 && horizonBars <= 20
             ? horizonBars
@@ -1028,7 +1029,6 @@ export default function DisplayPage() {
         params: {
           volRatioMax: Number.isFinite(volRatioMax) ? volRatioMax : 0.5,
           minBodyPct: Number.isFinite(minBodyPct) ? minBodyPct : 0.002,
-          lookbackBars: Number.isFinite(lookbackBars) ? lookbackBars : 3,
         },
       };
       const res = await fetch(`${apiBase}/api/strategy/low_volume_pullback/backtest`, {
@@ -1060,7 +1060,6 @@ export default function DisplayPage() {
     try {
       const volRatioMax = Number.parseFloat(lvVolRatioMax);
       const minBodyPct = Number.parseFloat(lvMinBodyPct);
-      const lookbackBars = Number.parseInt(lvRangeLookback, 10);
       const horizonBars = Number.parseInt(lvRangeHorizonBars, 10);
       const payload = {
         timeframe: lvTimeframe || "6M_1d",
@@ -1075,8 +1074,6 @@ export default function DisplayPage() {
         params: {
           volRatioMax: Number.isFinite(volRatioMax) ? volRatioMax : 0.5,
           minBodyPct: Number.isFinite(minBodyPct) ? minBodyPct : 0.002,
-          lookbackBars:
-            Number.isFinite(lookbackBars) && lookbackBars >= 1 ? lookbackBars : 1,
         },
       };
       const res = await fetch(
@@ -1645,7 +1642,7 @@ export default function DisplayPage() {
                   />
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <span>Lookback</span>
+                  <span>Recent bars</span>
                   <input
                     type="number"
                     min={1}
@@ -1969,7 +1966,7 @@ export default function DisplayPage() {
                   <h4 className="text-sm font-semibold text-slate-800">Range Metrics</h4>
                   <p className="mt-1 text-[11px] text-slate-500">
                     区间内按 asOf 逐日模拟筛选信号，统计 D+1..D+N 的胜率与分桶占比。
-                    区间统计建议 lookbackBars=1（只认当天信号，避免 lookback&gt;1 时的重复追认）。
+                    区间统计口径为“只认当天是否 hit”，不再使用 lookbackBars。
                   </p>
                 </div>
                 <button
@@ -2026,16 +2023,6 @@ export default function DisplayPage() {
                     <option value="close">close</option>
                     <option value="next_open">next_open</option>
                   </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-medium text-slate-700">lookbackBars</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={lvRangeLookback}
-                    onChange={(e) => setLvRangeLookback(e.target.value)}
-                    className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
-                  />
                 </div>
               </div>
 

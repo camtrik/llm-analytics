@@ -8,10 +8,12 @@ low_volume_pullback:
   screener:
     onlyTriggered: true
     autoRefreshIfMissing: true
+    recentBars: 3
 
   backtest:
     onlyTriggered: true
     autoRefreshIfMissing: false
+    recentBars: 3
     horizonBars: 5
     entryExecution: "close" # close | next_open
 
@@ -20,8 +22,6 @@ low_volume_pullback:
     horizonBars: 5
     entryExecution: "close" # close | next_open
     bucketThresholdPct: 0.05
-    params:
-      lookbackBars: 1
 
   params:
     fastMA: 5
@@ -33,5 +33,4 @@ low_volume_pullback:
     volRatioMax: 0.5
     minBodyPct: 0.002
     minRangePct: null
-    lookbackBars: 3
     eps: 1e-12

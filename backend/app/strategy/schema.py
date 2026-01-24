@@ -18,7 +18,6 @@ class LowVolumePullbackParamsModel(BaseModel):
     volRatioMax: float = 0.5
     minBodyPct: float = 0.002
     minRangePct: float | None = None
-    lookbackBars: int = 3
     eps: float = 1e-12
 
     def to_params(self) -> LowVolumePullbackParams:
@@ -32,7 +31,6 @@ class LowVolumePullbackParamsModel(BaseModel):
             vol_ratio_max=self.volRatioMax,
             min_body_pct=self.minBodyPct,
             min_range_pct=self.minRangePct,
-            lookback_bars=self.lookbackBars,
             eps=self.eps,
         )
 
@@ -47,7 +45,6 @@ class LowVolumePullbackParamsPatchModel(BaseModel):
     volRatioMax: float | None = None
     minBodyPct: float | None = None
     minRangePct: float | None = None
-    lookbackBars: int | None = None
     eps: float | None = None
 
 
@@ -73,6 +70,7 @@ class LowVolumeHit(BaseModel):
 class LowVolumePullbackRequest(BaseModel):
     timeframe: str | None = None
     tickers: list[str] | None = None
+    recentBars: int | None = None
     params: LowVolumePullbackParamsPatchModel | None = None
     onlyTriggered: bool | None = None
 
@@ -92,6 +90,7 @@ class LowVolumePullbackBacktestRequest(BaseModel):
     asOfTs: int | None = None
     tickers: list[str] | None = None
     onlyTriggered: bool | None = None
+    recentBars: int | None = None
     horizonBars: int | None = None
     entryExecution: EntryExecution | None = None
     params: LowVolumePullbackParamsPatchModel | None = None
@@ -107,6 +106,8 @@ class LowVolumePullbackBacktestRequest(BaseModel):
                 raise ValueError("horizonBars must be >= 1")
             if self.horizonBars > 20:
                 raise ValueError("horizonBars must be <= 20")
+        if self.recentBars is not None and self.recentBars < 1:
+            raise ValueError("recentBars must be >= 1")
         return self
 
 

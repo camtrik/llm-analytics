@@ -27,7 +27,6 @@ class LowVolumePullbackParams:
     vol_ratio_max: float = 0.5
     min_body_pct: float = 0.002
     min_range_pct: float | None = None
-    lookback_bars: int = 3
     eps: float = 1e-12
 
 
@@ -71,7 +70,6 @@ def _default_params_from_config() -> LowVolumePullbackParams:
         vol_ratio_max=float(params_cfg.get("volRatioMax", defaults.vol_ratio_max)),
         min_body_pct=float(params_cfg.get("minBodyPct", defaults.min_body_pct)),
         min_range_pct=params_cfg.get("minRangePct", defaults.min_range_pct),
-        lookback_bars=int(params_cfg.get("lookbackBars", defaults.lookback_bars)),
         eps=float(params_cfg.get("eps", defaults.eps)),
     )
 
@@ -79,6 +77,7 @@ def _default_params_from_config() -> LowVolumePullbackParams:
 def screen_low_volume_pullback(
     tickers: Iterable[str],
     timeframe: str | None = None,
+    recent_bars: int = 3,
     params: LowVolumePullbackParams | None = None,
     cache: MarketCache | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -107,108 +106,106 @@ def screen_low_volume_pullback(
             yield result
             continue
 
-        detection = _detect_low_volume_pullback(df, params)
-        result.update(detection)
+        hits = detect_low_volume_pullback_hits(df, params, end_idx=len(df) - 1, recent_bars=recent_bars)
+        if hits.get("error"):
+            result["error"] = hits.get("error")
+            result["hits"] = []
+            yield result
+            continue
+        result.update(hits)
         yield result
 
 
-def _detect_low_volume_pullback(
-    df: pd.DataFrame, params: LowVolumePullbackParams, end_idx: int | None = None
-) -> dict[str, object]:
-    close = df["Close"]
-    open_ = df["Open"]
-    high = df["High"]
-    low = df["Low"]
-    volume = df["Volume"]
-
-    max_window = max(
-        params.fast_ma,
-        params.slow_ma,
-        params.long_ma,
-        params.vol_avg_window,
-    )
-
-    latest_idx = len(df) - 1
-    if latest_idx < 0:
-        return {"triggered": False, "error": "no_bars"}
-
-    if end_idx is None:
-        end_idx = latest_idx
-    if end_idx < 0 or end_idx > latest_idx:
-        return {"triggered": False, "error": "invalid_asof"}
-
-    required_len = max(
+def _required_bars_for_low_volume_pullback(params: LowVolumePullbackParams) -> int:
+    return max(
         params.vol_avg_window + 1,
         params.long_ma + params.long_ma_slope_window,
         params.slow_ma,
         params.fast_ma,
-        params.lookback_bars,
     )
-    if end_idx + 1 < required_len:
-        return {"triggered": False, "error": "insufficient_bars"}
+
+
+def _compute_low_volume_pullback_series(
+    df: pd.DataFrame,
+    params: LowVolumePullbackParams,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    close = df["Close"].astype(float)
+    open_ = df["Open"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    volume = df["Volume"].astype(float)
 
     fast_ma = close.rolling(params.fast_ma, min_periods=params.fast_ma).mean()
     slow_ma = close.rolling(params.slow_ma, min_periods=params.slow_ma).mean()
     long_ma = close.rolling(params.long_ma, min_periods=params.long_ma).mean()
 
-    def _trend_ok(idx: int) -> bool:
-        if pd.isna(fast_ma.iloc[idx]) or pd.isna(slow_ma.iloc[idx]) or pd.isna(long_ma.iloc[idx]):
-            return False
-        if close.iloc[idx] <= fast_ma.iloc[idx] or close.iloc[idx] <= slow_ma.iloc[idx]:
-            return False
-        if fast_ma.iloc[idx] <= slow_ma.iloc[idx]:
-            return False
-        slope_idx = idx - params.long_ma_slope_window
-        if slope_idx < 0 or pd.isna(long_ma.iloc[slope_idx]):
-            return False
-        return long_ma.iloc[idx] > long_ma.iloc[slope_idx] * (1 + params.long_ma_slope_min_pct)
+    open_denom = open_.where(open_ > params.eps, params.eps)
+    body_pct = (close - open_).abs() / open_denom
+    bearish_ok = (close < open_) & (body_pct >= params.min_body_pct)
+    if params.min_range_pct is not None:
+        range_pct = (high - low) / open_denom
+        bearish_ok &= range_pct >= float(params.min_range_pct)
 
-    lookback_start = max(0, end_idx - params.lookback_bars + 1)
+    slope_ref = long_ma.shift(params.long_ma_slope_window)
+    trend_ok = (close > fast_ma) & (close > slow_ma) & (fast_ma > slow_ma)
+    trend_ok &= long_ma > (slope_ref * (1 + params.long_ma_slope_min_pct))
+    trend_ok = trend_ok.fillna(False)
+
+    vol_avg = (
+        volume.shift(1)
+        .rolling(params.vol_avg_window, min_periods=params.vol_avg_window)
+        .mean()
+    )
+    vol_ok = vol_avg.notna() & (vol_avg > 0) & volume.notna() & (volume > 0)
+    vol_ratio = (volume / vol_avg).where(vol_ok)
+    volume_ok = vol_ok & vol_ratio.notna() & (vol_ratio <= params.vol_ratio_max)
+    volume_ok = volume_ok.fillna(False)
+
+    hit = (trend_ok & bearish_ok & volume_ok).fillna(False)
+    return hit, vol_ratio, body_pct
+
+
+def detect_low_volume_pullback_hits(
+    df: pd.DataFrame,
+    params: LowVolumePullbackParams,
+    end_idx: int,
+    recent_bars: int,
+) -> dict[str, object]:
+    """Collect hits within the last `recent_bars` ending at `end_idx` (inclusive)."""
+    latest_idx = len(df) - 1
+    if latest_idx < 0:
+        return {"triggered": False, "error": "no_bars", "hits": []}
+    if end_idx < 0 or end_idx > latest_idx:
+        return {"triggered": False, "error": "invalid_asof", "hits": []}
+
+    required_len = _required_bars_for_low_volume_pullback(params)
+    if end_idx + 1 < required_len:
+        return {"triggered": False, "error": "insufficient_bars", "hits": []}
+
+    hit, vol_ratio, body_pct = _compute_low_volume_pullback_series(df, params)
+
+    window = max(1, int(recent_bars))
+    start_idx = max(required_len - 1, end_idx - window + 1)
 
     hits: list[dict[str, object]] = []
-
-    for idx in range(end_idx, lookback_start - 1, -1):
-        if idx < params.vol_avg_window:
+    for idx in range(end_idx, start_idx - 1, -1):
+        if not bool(hit.iloc[idx]):
             continue
-        if not _trend_ok(idx):
-            continue
-        o = open_.iloc[idx]
-        c = close.iloc[idx]
-        h = high.iloc[idx]
-        l = low.iloc[idx]
-        body_pct = abs(c - o) / max(o, params.eps)
-        if c >= o or body_pct < params.min_body_pct:
-            continue
-        if params.min_range_pct is not None:
-            range_pct = (h - l) / max(o, params.eps)
-            if range_pct < params.min_range_pct:
-                continue
-
-        vol_slice = volume.iloc[idx - params.vol_avg_window : idx]
-        vol_avg = vol_slice.mean()
-        if pd.isna(vol_avg) or vol_avg <= 0:
-            continue
-        cur_vol = volume.iloc[idx]
-        if pd.isna(cur_vol) or cur_vol <= 0:
-            continue
-        vol_ratio = cur_vol / vol_avg if vol_avg else float("inf")
-        if vol_ratio > params.vol_ratio_max:
-            continue
-
         ts = int(df.index[idx].timestamp())
+        vr = vol_ratio.iloc[idx]
+        bp = body_pct.iloc[idx]
         hits.append(
             {
                 "bar_index": idx,
                 "as_of": ts,
-                "vol_ratio": float(vol_ratio),
-                "body_pct": float(body_pct),
+                "vol_ratio": float(vr) if pd.notna(vr) else None,
+                "body_pct": float(bp) if pd.notna(bp) else None,
             }
         )
 
     if not hits:
         return {"triggered": False, "hits": []}
 
-    # hits are gathered from most recent to older; keep summary fields for compatibility
     latest_hit = hits[0]
     return {
         "triggered": True,
@@ -224,6 +221,7 @@ def backtest_low_volume_pullback_on_df(
     df: pd.DataFrame,
     params: LowVolumePullbackParams,
     cutoff_dt: datetime,
+    recent_bars: int,
     horizon_bars: int,
     entry_execution: str,
 ) -> dict[str, object]:
@@ -234,7 +232,13 @@ def backtest_low_volume_pullback_on_df(
         return {"triggered": False, "error": "asof_out_of_range"}
 
     end_ts = int(df.index[end_pos].timestamp())
-    detection = _detect_low_volume_pullback(df, params, end_idx=end_pos)
+
+    detection = detect_low_volume_pullback_hits(
+        df,
+        params,
+        end_idx=end_pos,
+        recent_bars=recent_bars,
+    )
     if not detection.get("triggered"):
         return {
             "triggered": False,
@@ -312,13 +316,12 @@ def backtest_low_volume_pullback_range_on_df(
 ) -> dict[str, object]:
     """Compute range backtest stats on a single ticker DataFrame.
 
-    Why this does NOT reuse `_detect_low_volume_pullback()`:
-    - `_detect_low_volume_pullback()` is designed for a single "asOf" check and builds a `hits`
-      list; calling it for every asOf day in a date range would repeatedly recompute rolling
-      indicators (MA / VOL_AVG / BODY_PCT / etc.) and scan the same history many times.
-    - Range backtest needs only per-bar `hit` booleans + forward return buckets. Precomputing
-      indicator series once and then iterating indices is dramatically faster for
-      (tickers × days) workloads like Nikkei225.
+    Why this precomputes the per-bar `hit` series:
+    - Range backtest evaluates many asOf indices (days × tickers). Recomputing rolling
+      indicators per asOf (even via helpers like `detect_low_volume_pullback_hits`) would
+      redo MA/VOL_AVG/BODY_PCT calculations repeatedly and be much slower.
+    - Range backtest only needs `hit[idx]` booleans + forward return buckets, so we compute
+      indicator series once and then iterate indices.
 
     Returns counts only (service layer converts counts to rates).
     """
@@ -354,17 +357,8 @@ def backtest_low_volume_pullback_range_on_df(
 
     close = df["Close"].astype(float)
     open_ = df["Open"].astype(float)
-    high = df["High"].astype(float)
-    low = df["Low"].astype(float)
-    volume = df["Volume"].astype(float)
 
-    required_len = max(
-        params.vol_avg_window + 1,
-        params.long_ma + params.long_ma_slope_window,
-        params.slow_ma,
-        params.fast_ma,
-        params.lookback_bars,
-    )
+    required_len = _required_bars_for_low_volume_pullback(params)
 
     eval_start = max(start_pos, required_len - 1)
     if eval_start > end_pos:
@@ -379,33 +373,7 @@ def backtest_low_volume_pullback_range_on_df(
             },
         }
 
-    fast_ma = close.rolling(params.fast_ma, min_periods=params.fast_ma).mean()
-    slow_ma = close.rolling(params.slow_ma, min_periods=params.slow_ma).mean()
-    long_ma = close.rolling(params.long_ma, min_periods=params.long_ma).mean()
-
-    open_denom = open_.where(open_ > params.eps, params.eps)
-    body_pct = (close - open_).abs() / open_denom
-    bearish_ok = (close < open_) & (body_pct >= params.min_body_pct)
-    if params.min_range_pct is not None:
-        range_pct = (high - low) / open_denom
-        bearish_ok &= range_pct >= float(params.min_range_pct)
-
-    slope_ref = long_ma.shift(params.long_ma_slope_window)
-    trend_ok = (close > fast_ma) & (close > slow_ma) & (fast_ma > slow_ma)
-    trend_ok &= long_ma > (slope_ref * (1 + params.long_ma_slope_min_pct))
-    trend_ok = trend_ok.fillna(False)
-
-    vol_avg = (
-        volume.shift(1)
-        .rolling(params.vol_avg_window, min_periods=params.vol_avg_window)
-        .mean()
-    )
-    vol_ok = vol_avg.notna() & (vol_avg > 0) & volume.notna() & (volume > 0)
-    vol_ratio = volume / vol_avg
-    volume_ok = vol_ok & (vol_ratio <= params.vol_ratio_max)
-    volume_ok = volume_ok.fillna(False)
-
-    hit = (trend_ok & bearish_ok & volume_ok).fillna(False)
+    hit, _, _ = _compute_low_volume_pullback_series(df, params)
 
     sample_count_by_day: dict[int, int] = {day: 0 for day in range(1, horizon + 1)}
     win_count_by_day: dict[int, int] = {day: 0 for day in range(1, horizon + 1)}
@@ -422,28 +390,15 @@ def backtest_low_volume_pullback_range_on_df(
     for asof_idx in range(eval_start, end_pos + 1):
         evaluated_bars += 1
 
-        signal_idx: int | None = None
-        if params.lookback_bars <= 1:
-            if bool(hit.iloc[asof_idx]):
-                signal_idx = asof_idx
-        else:
-            lookback_start = asof_idx - params.lookback_bars + 1
-            if lookback_start < 0:
-                lookback_start = 0
-            for idx in range(asof_idx, lookback_start - 1, -1):
-                if bool(hit.iloc[idx]):
-                    signal_idx = idx
-                    break
-
-        if signal_idx is None:
+        if not bool(hit.iloc[asof_idx]):
             continue
 
         triggered_events += 1
 
         if entry_execution == "close":
-            entry_price = float(close.iloc[signal_idx])
+            entry_price = float(close.iloc[asof_idx])
         elif entry_execution == "next_open":
-            entry_bar = signal_idx + 1
+            entry_bar = asof_idx + 1
             if entry_bar >= len(df):
                 continue
             entry_price = float(open_.iloc[entry_bar])
@@ -454,7 +409,7 @@ def backtest_low_volume_pullback_range_on_df(
             continue
 
         for day in range(1, horizon + 1):
-            fwd_idx = signal_idx + day
+            fwd_idx = asof_idx + day
             if fwd_idx >= len(df):
                 break
             close_val = float(close.iloc[fwd_idx])
