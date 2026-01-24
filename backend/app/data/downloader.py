@@ -27,7 +27,11 @@ def _normalize_download(df: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
         return pd.DataFrame(columns=["Datetime", "Ticker"])
 
     if isinstance(df.columns, pd.MultiIndex):
-        df = df.stack(level=0)
+        # pandas future behavior: opt in to new stack impl to silence warning
+        try:
+            df = df.stack(level=0, future_stack=True)
+        except TypeError:
+            df = df.stack(level=0)
         df.index.names = ["Datetime", "Ticker"]
         df = df.reset_index()
     else:
