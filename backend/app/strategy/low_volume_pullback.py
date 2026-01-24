@@ -188,7 +188,10 @@ def _detect_low_volume_pullback(
         vol_avg = vol_slice.mean()
         if pd.isna(vol_avg) or vol_avg <= 0:
             continue
-        vol_ratio = volume.iloc[idx] / vol_avg if vol_avg else float("inf")
+        cur_vol = volume.iloc[idx]
+        if pd.isna(cur_vol) or cur_vol <= 0:
+            continue
+        vol_ratio = cur_vol / vol_avg if vol_avg else float("inf")
         if vol_ratio > params.vol_ratio_max:
             continue
 
@@ -295,6 +298,190 @@ def backtest_low_volume_pullback_on_df(
         "vol_ratio": float(vol_ratio) if vol_ratio is not None else None,
         "body_pct": float(body_pct) if body_pct is not None else None,
         "forward": forward,
+    }
+
+
+def backtest_low_volume_pullback_range_on_df(
+    df: pd.DataFrame,
+    params: LowVolumePullbackParams,
+    start_dt: datetime,
+    end_dt: datetime,
+    horizon_bars: int,
+    entry_execution: str,
+    bucket_threshold_pct: float,
+) -> dict[str, object]:
+    """Compute range backtest stats on a single ticker DataFrame.
+
+    Why this does NOT reuse `_detect_low_volume_pullback()`:
+    - `_detect_low_volume_pullback()` is designed for a single "asOf" check and builds a `hits`
+      list; calling it for every asOf day in a date range would repeatedly recompute rolling
+      indicators (MA / VOL_AVG / BODY_PCT / etc.) and scan the same history many times.
+    - Range backtest needs only per-bar `hit` booleans + forward return buckets. Precomputing
+      indicator series once and then iterating indices is dramatically faster for
+      (tickers × days) workloads like Nikkei225.
+
+    Returns counts only (service layer converts counts to rates).
+    """
+    horizon = int(horizon_bars)
+    if horizon < 1:
+        return {"error": "invalid_horizon"}
+    if df.empty:
+        return {
+            "evaluated_bars": 0,
+            "triggered_events": 0,
+            "sample_count_by_day": {day: 0 for day in range(1, horizon + 1)},
+            "win_count_by_day": {day: 0 for day in range(1, horizon + 1)},
+            "bucket_count_by_day": {
+                day: {"down_gt_5": 0, "down_0_5": 0, "up_0_5": 0, "up_gt_5": 0}
+                for day in range(1, horizon + 1)
+            },
+        }
+
+    latest_idx = len(df) - 1
+    start_pos = int(df.index.searchsorted(start_dt, side="left"))
+    end_pos = int(df.index.searchsorted(end_dt, side="right") - 1)
+    if end_pos < 0 or start_pos > latest_idx or end_pos < start_pos:
+        return {
+            "evaluated_bars": 0,
+            "triggered_events": 0,
+            "sample_count_by_day": {day: 0 for day in range(1, horizon + 1)},
+            "win_count_by_day": {day: 0 for day in range(1, horizon + 1)},
+            "bucket_count_by_day": {
+                day: {"down_gt_5": 0, "down_0_5": 0, "up_0_5": 0, "up_gt_5": 0}
+                for day in range(1, horizon + 1)
+            },
+        }
+
+    close = df["Close"].astype(float)
+    open_ = df["Open"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    volume = df["Volume"].astype(float)
+
+    required_len = max(
+        params.vol_avg_window + 1,
+        params.long_ma + params.long_ma_slope_window,
+        params.slow_ma,
+        params.fast_ma,
+        params.lookback_bars,
+    )
+
+    eval_start = max(start_pos, required_len - 1)
+    if eval_start > end_pos:
+        return {
+            "evaluated_bars": 0,
+            "triggered_events": 0,
+            "sample_count_by_day": {day: 0 for day in range(1, horizon + 1)},
+            "win_count_by_day": {day: 0 for day in range(1, horizon + 1)},
+            "bucket_count_by_day": {
+                day: {"down_gt_5": 0, "down_0_5": 0, "up_0_5": 0, "up_gt_5": 0}
+                for day in range(1, horizon + 1)
+            },
+        }
+
+    fast_ma = close.rolling(params.fast_ma, min_periods=params.fast_ma).mean()
+    slow_ma = close.rolling(params.slow_ma, min_periods=params.slow_ma).mean()
+    long_ma = close.rolling(params.long_ma, min_periods=params.long_ma).mean()
+
+    open_denom = open_.where(open_ > params.eps, params.eps)
+    body_pct = (close - open_).abs() / open_denom
+    bearish_ok = (close < open_) & (body_pct >= params.min_body_pct)
+    if params.min_range_pct is not None:
+        range_pct = (high - low) / open_denom
+        bearish_ok &= range_pct >= float(params.min_range_pct)
+
+    slope_ref = long_ma.shift(params.long_ma_slope_window)
+    trend_ok = (close > fast_ma) & (close > slow_ma) & (fast_ma > slow_ma)
+    trend_ok &= long_ma > (slope_ref * (1 + params.long_ma_slope_min_pct))
+    trend_ok = trend_ok.fillna(False)
+
+    vol_avg = (
+        volume.shift(1)
+        .rolling(params.vol_avg_window, min_periods=params.vol_avg_window)
+        .mean()
+    )
+    vol_ok = vol_avg.notna() & (vol_avg > 0) & volume.notna() & (volume > 0)
+    vol_ratio = volume / vol_avg
+    volume_ok = vol_ok & (vol_ratio <= params.vol_ratio_max)
+    volume_ok = volume_ok.fillna(False)
+
+    hit = (trend_ok & bearish_ok & volume_ok).fillna(False)
+
+    sample_count_by_day: dict[int, int] = {day: 0 for day in range(1, horizon + 1)}
+    win_count_by_day: dict[int, int] = {day: 0 for day in range(1, horizon + 1)}
+    bucket_count_by_day: dict[int, dict[str, int]] = {
+        day: {"down_gt_5": 0, "down_0_5": 0, "up_0_5": 0, "up_gt_5": 0}
+        for day in range(1, horizon + 1)
+    }
+
+    evaluated_bars = 0
+    triggered_events = 0
+    threshold = float(bucket_threshold_pct)
+    tol = max(float(params.eps), 1e-12)
+
+    for asof_idx in range(eval_start, end_pos + 1):
+        evaluated_bars += 1
+
+        signal_idx: int | None = None
+        if params.lookback_bars <= 1:
+            if bool(hit.iloc[asof_idx]):
+                signal_idx = asof_idx
+        else:
+            lookback_start = asof_idx - params.lookback_bars + 1
+            if lookback_start < 0:
+                lookback_start = 0
+            for idx in range(asof_idx, lookback_start - 1, -1):
+                if bool(hit.iloc[idx]):
+                    signal_idx = idx
+                    break
+
+        if signal_idx is None:
+            continue
+
+        triggered_events += 1
+
+        if entry_execution == "close":
+            entry_price = float(close.iloc[signal_idx])
+        elif entry_execution == "next_open":
+            entry_bar = signal_idx + 1
+            if entry_bar >= len(df):
+                continue
+            entry_price = float(open_.iloc[entry_bar])
+        else:
+            return {"error": "invalid_entry_execution"}
+
+        if not pd.notna(entry_price) or entry_price <= 0:
+            continue
+
+        for day in range(1, horizon + 1):
+            fwd_idx = signal_idx + day
+            if fwd_idx >= len(df):
+                break
+            close_val = float(close.iloc[fwd_idx])
+            if not pd.notna(close_val):
+                break
+            ret = close_val / entry_price - 1
+
+            sample_count_by_day[day] += 1
+            if ret > 0:
+                win_count_by_day[day] += 1
+
+            if ret <= (-threshold + tol):
+                bucket = "down_gt_5"
+            elif ret < -tol:
+                bucket = "down_0_5"
+            elif ret <= threshold + tol:
+                bucket = "up_0_5"
+            else:
+                bucket = "up_gt_5"
+            bucket_count_by_day[day][bucket] += 1
+
+    return {
+        "evaluated_bars": evaluated_bars,
+        "triggered_events": triggered_events,
+        "sample_count_by_day": sample_count_by_day,
+        "win_count_by_day": win_count_by_day,
+        "bucket_count_by_day": bucket_count_by_day,
     }
 
 

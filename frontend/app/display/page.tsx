@@ -319,6 +319,32 @@ type LowVolumeBacktestResponse = {
   results: LowVolumeBacktestResult[];
 };
 
+type LowVolumeRangeBucketRate = {
+  down_gt_5: number;
+  down_0_5: number;
+  up_0_5: number;
+  up_gt_5: number;
+};
+
+type LowVolumeRangeBacktestSummary = {
+  universeSize: number;
+  evaluatedBars: number;
+  triggeredEvents: number;
+  sampleCountByDay: Record<string, number>;
+  winRateByDay: Record<string, number>;
+  bucketRateByDay: Record<string, LowVolumeRangeBucketRate>;
+};
+
+type LowVolumeRangeBacktestResponse = {
+  timeframe: string;
+  startTs: number;
+  endTs: number;
+  horizonBars: number;
+  entryExecution: LowVolumeBacktestEntryExecution;
+  params: LowVolumeParams;
+  summary: LowVolumeRangeBacktestSummary;
+};
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -442,6 +468,19 @@ export default function DisplayPage() {
   const [lvBtLoading, setLvBtLoading] = useState(false);
   const [lvBtError, setLvBtError] = useState<string | null>(null);
   const [lvBtResult, setLvBtResult] = useState<LowVolumeBacktestResponse | null>(null);
+  const [lvRangeStartDate, setLvRangeStartDate] = useState<string>(
+    new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
+  const [lvRangeEndDate, setLvRangeEndDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [lvRangeHorizonBars, setLvRangeHorizonBars] = useState<string>("5");
+  const [lvRangeEntryExecution, setLvRangeEntryExecution] =
+    useState<LowVolumeBacktestEntryExecution>("close");
+  const [lvRangeLookback, setLvRangeLookback] = useState<string>("1");
+  const [lvRangeLoading, setLvRangeLoading] = useState(false);
+  const [lvRangeError, setLvRangeError] = useState<string | null>(null);
+  const [lvRangeResult, setLvRangeResult] = useState<LowVolumeRangeBacktestResponse | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   const apiBase =
@@ -1007,6 +1046,57 @@ export default function DisplayPage() {
       setLvBtError(err instanceof Error ? err.message : "回测失败。");
     } finally {
       setLvBtLoading(false);
+    }
+  };
+
+  const runLowVolumeRangeBacktest = async () => {
+    if (!lvRangeStartDate || !lvRangeEndDate) {
+      setLvRangeError("请选择开始和结束日期。");
+      return;
+    }
+    setLvRangeError(null);
+    setLvRangeLoading(true);
+    setLvRangeResult(null);
+    try {
+      const volRatioMax = Number.parseFloat(lvVolRatioMax);
+      const minBodyPct = Number.parseFloat(lvMinBodyPct);
+      const lookbackBars = Number.parseInt(lvRangeLookback, 10);
+      const horizonBars = Number.parseInt(lvRangeHorizonBars, 10);
+      const payload = {
+        timeframe: lvTimeframe || "6M_1d",
+        startDate: lvRangeStartDate,
+        endDate: lvRangeEndDate,
+        tickers: null,
+        horizonBars:
+          Number.isFinite(horizonBars) && horizonBars >= 1 && horizonBars <= 20
+            ? horizonBars
+            : 5,
+        entryExecution: lvRangeEntryExecution,
+        params: {
+          volRatioMax: Number.isFinite(volRatioMax) ? volRatioMax : 0.5,
+          minBodyPct: Number.isFinite(minBodyPct) ? minBodyPct : 0.002,
+          lookbackBars:
+            Number.isFinite(lookbackBars) && lookbackBars >= 1 ? lookbackBars : 1,
+        },
+      };
+      const res = await fetch(
+        `${apiBase}/api/strategy/low_volume_pullback/backtest/range`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as LowVolumeRangeBacktestResponse;
+      setLvRangeResult(data);
+    } catch (err) {
+      setLvRangeError(err instanceof Error ? err.message : "区间统计失败。");
+    } finally {
+      setLvRangeLoading(false);
     }
   };
 
@@ -1866,6 +1956,165 @@ export default function DisplayPage() {
                             </td>
                           </tr>
                         )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Range Metrics</h4>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    区间内按 asOf 逐日模拟筛选信号，统计 D+1..D+N 的胜率与分桶占比。
+                    区间统计建议 lookbackBars=1（只认当天信号，避免 lookback&gt;1 时的重复追认）。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={runLowVolumeRangeBacktest}
+                  disabled={lvRangeLoading}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {lvRangeLoading ? "统计中..." : "运行区间统计"}
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-700">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">Start</label>
+                  <input
+                    type="date"
+                    value={lvRangeStartDate}
+                    onChange={(e) => setLvRangeStartDate(e.target.value)}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">End</label>
+                  <input
+                    type="date"
+                    value={lvRangeEndDate}
+                    onChange={(e) => setLvRangeEndDate(e.target.value)}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">Horizon</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={lvRangeHorizonBars}
+                    onChange={(e) => setLvRangeHorizonBars(e.target.value)}
+                    className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">Entry</label>
+                  <select
+                    value={lvRangeEntryExecution}
+                    onChange={(e) =>
+                      setLvRangeEntryExecution(
+                        e.target.value as LowVolumeBacktestEntryExecution
+                      )
+                    }
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  >
+                    <option value="close">close</option>
+                    <option value="next_open">next_open</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">lookbackBars</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={lvRangeLookback}
+                    onChange={(e) => setLvRangeLookback(e.target.value)}
+                    className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+              </div>
+
+              {lvRangeError && <p className="mt-3 text-xs text-rose-500">{lvRangeError}</p>}
+
+              {lvRangeResult && (
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-semibold text-slate-800">Summary</div>
+                      <div className="text-slate-600">
+                        {formatTimestamp(lvRangeResult.startTs)} ~ {formatTimestamp(lvRangeResult.endTs)} · universe{" "}
+                        {lvRangeResult.summary.universeSize} · events{" "}
+                        {lvRangeResult.summary.triggeredEvents} · evaluated{" "}
+                        {lvRangeResult.summary.evaluatedBars}
+                      </div>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600 md:grid-cols-5">
+                      {Array.from(
+                        { length: lvRangeResult.horizonBars },
+                        (_, i) => i + 1
+                      ).map((day) => {
+                        const key = String(day);
+                        const denom = lvRangeResult.summary.sampleCountByDay?.[key] ?? 0;
+                        const win = lvRangeResult.summary.winRateByDay?.[key];
+                        return (
+                          <div key={`range-s-${day}`}>
+                            D+{day}: n={denom}
+                            {win !== undefined ? ` win ${(win * 100).toFixed(0)}%` : ""}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Day</th>
+                          <th className="px-3 py-2 text-right">Samples</th>
+                          <th className="px-3 py-2 text-right">Win%</th>
+                          <th className="px-3 py-2 text-right">≤-5%</th>
+                          <th className="px-3 py-2 text-right">-5~0%</th>
+                          <th className="px-3 py-2 text-right">0~5%</th>
+                          <th className="px-3 py-2 text-right">&gt;5%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.from(
+                          { length: lvRangeResult.horizonBars },
+                          (_, i) => i + 1
+                        ).map((day) => {
+                          const key = String(day);
+                          const denom = lvRangeResult.summary.sampleCountByDay?.[key] ?? 0;
+                          const win = lvRangeResult.summary.winRateByDay?.[key];
+                          const buckets = lvRangeResult.summary.bucketRateByDay?.[key];
+                          return (
+                            <tr key={`range-r-${day}`} className="border-b border-slate-100">
+                              <td className="px-3 py-2 text-left text-slate-700">D+{day}</td>
+                              <td className="px-3 py-2 text-right text-slate-700">{denom}</td>
+                              <td className="px-3 py-2 text-right text-slate-700">
+                                {win !== undefined ? `${(win * 100).toFixed(0)}%` : "-"}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-700">
+                                {buckets ? `${(buckets.down_gt_5 * 100).toFixed(0)}%` : "-"}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-700">
+                                {buckets ? `${(buckets.down_0_5 * 100).toFixed(0)}%` : "-"}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-700">
+                                {buckets ? `${(buckets.up_0_5 * 100).toFixed(0)}%` : "-"}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-700">
+                                {buckets ? `${(buckets.up_gt_5 * 100).toFixed(0)}%` : "-"}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

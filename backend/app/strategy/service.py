@@ -11,6 +11,7 @@ from app.quant.engine import _bars_to_df
 from app.strategy.low_volume_pullback import (
     LowVolumePullbackParams,
     backtest_low_volume_pullback_on_df,
+    backtest_low_volume_pullback_range_on_df,
     load_tickers,
     screen_low_volume_pullback,
 )
@@ -21,6 +22,10 @@ from app.strategy.schema import (
     LowVolumePullbackBacktestResult,
     LowVolumePullbackBacktestSignal,
     LowVolumePullbackBacktestSummary,
+    LowVolumeBucketRate,
+    LowVolumePullbackBacktestRangeRequest,
+    LowVolumePullbackBacktestRangeResponse,
+    LowVolumePullbackBacktestRangeSummary,
     LowVolumeHit,
     LowVolumePullbackParamsModel,
     LowVolumePullbackParamsPatchModel,
@@ -238,6 +243,45 @@ def _resolve_cutoff_dt(payload: LowVolumePullbackBacktestRequest) -> datetime:
     )
 
 
+def _resolve_range_window(payload: LowVolumePullbackBacktestRangeRequest) -> tuple[datetime, datetime]:
+    try:
+        start_date = datetime.fromisoformat(payload.startDate).date()
+        end_date = datetime.fromisoformat(payload.endDate).date()
+    except ValueError as exc:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="Invalid startDate/endDate format. Expected YYYY-MM-DD.",
+            details={"startDate": payload.startDate, "endDate": payload.endDate},
+        ) from exc
+    if start_date > end_date:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="startDate must be <= endDate.",
+            details={"startDate": payload.startDate, "endDate": payload.endDate},
+        )
+    start_dt = datetime(
+        start_date.year,
+        start_date.month,
+        start_date.day,
+        0,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    )
+    end_dt = datetime(
+        end_date.year,
+        end_date.month,
+        end_date.day,
+        23,
+        59,
+        59,
+        tzinfo=timezone.utc,
+    )
+    return start_dt, end_dt
+
+
 def low_volume_pullback_backtest(
     payload: LowVolumePullbackBacktestRequest,
 ) -> LowVolumePullbackBacktestResponse:
@@ -424,4 +468,167 @@ def low_volume_pullback_backtest(
         params=resolved_params_model,
         summary=summary,
         results=results,
+    )
+
+
+def low_volume_pullback_backtest_range(
+    payload: LowVolumePullbackBacktestRangeRequest,
+) -> LowVolumePullbackBacktestRangeResponse:
+    cfg = get_low_volume_pullback_config()
+    timeframe = (payload.timeframe or _default_timeframe_from_config()).strip()
+    if timeframe not in _timeframe_map:
+        raise ApiError(
+            status_code=404,
+            error="not_found",
+            message="Timeframe not supported.",
+            details={"timeframe": timeframe},
+        )
+
+    defaults = _default_tickers()
+    default_symbols = [item["symbol"] for item in defaults if "symbol" in item]
+    symbols = list(default_symbols)
+    if payload.tickers:
+        for sym in payload.tickers:
+            s = str(sym).strip()
+            if s and s not in symbols:
+                symbols.append(s)
+
+    if not symbols:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="tickers is required (default list empty).",
+        )
+
+    seen = set()
+    unique_symbols: list[str] = []
+    for sym in symbols:
+        s = str(sym).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        unique_symbols.append(s)
+
+    start_dt, end_dt = _resolve_range_window(payload)
+
+    range_cfg = cfg.get("rangeBacktest", {}) if isinstance(cfg.get("rangeBacktest"), dict) else {}
+    auto_refresh = bool(range_cfg.get("autoRefreshIfMissing", False))
+    horizon_default = int(range_cfg.get("horizonBars", 5))
+    entry_execution_default = str(range_cfg.get("entryExecution", "close"))
+    bucket_threshold = float(range_cfg.get("bucketThresholdPct", 0.05))
+
+    horizon = int(payload.horizonBars if payload.horizonBars is not None else horizon_default)
+    entry_execution = payload.entryExecution or entry_execution_default  # type: ignore[assignment]
+    if entry_execution not in {"close", "next_open"}:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="entryExecution must be close or next_open.",
+            details={"entryExecution": entry_execution},
+        )
+
+    resolved_params_model = _resolve_params_from_config(payload.params)
+    user_patch = payload.params.model_dump(exclude_none=True) if payload.params else {}
+    range_params = range_cfg.get("params", {}) if isinstance(range_cfg.get("params"), dict) else {}
+    if range_params:
+        merged_params = resolved_params_model.model_dump()
+        for key, value in range_params.items():
+            if key not in user_patch:
+                merged_params[key] = value
+        resolved_params_model = LowVolumePullbackParamsModel(**merged_params)
+    params = resolved_params_model.to_params()
+
+    if auto_refresh:
+        _ensure_cache_ready(unique_symbols, timeframe)
+    bars_by_symbol = _cache.get_bars_batch(unique_symbols, timeframe)
+
+    evaluated_bars_total = 0
+    triggered_events_total = 0
+    sample_count_by_day: dict[int, int] = {day: 0 for day in range(1, horizon + 1)}
+    win_count_by_day: dict[int, int] = {day: 0 for day in range(1, horizon + 1)}
+    bucket_count_by_day: dict[int, dict[str, int]] = {
+        day: {"down_gt_5": 0, "down_0_5": 0, "up_0_5": 0, "up_gt_5": 0}
+        for day in range(1, horizon + 1)
+    }
+
+    for symbol in unique_symbols:
+        bars = bars_by_symbol.get(symbol, [])
+        df = _bars_to_df(bars)
+        if df.empty:
+            continue
+        bt = backtest_low_volume_pullback_range_on_df(
+            df=df,
+            params=params,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            horizon_bars=horizon,
+            entry_execution=entry_execution,
+            bucket_threshold_pct=bucket_threshold,
+        )
+        if bt.get("error"):
+            continue
+        evaluated_bars_total += int(bt.get("evaluated_bars", 0) or 0)
+        triggered_events_total += int(bt.get("triggered_events", 0) or 0)
+
+        per_day_samples = bt.get("sample_count_by_day") or {}
+        per_day_wins = bt.get("win_count_by_day") or {}
+        per_day_buckets = bt.get("bucket_count_by_day") or {}
+        if not isinstance(per_day_samples, dict) or not isinstance(per_day_wins, dict) or not isinstance(per_day_buckets, dict):
+            continue
+
+        for day in range(1, horizon + 1):
+            denom = int(per_day_samples.get(day, 0) or 0)
+            wins = int(per_day_wins.get(day, 0) or 0)
+            buckets = per_day_buckets.get(day, {}) if isinstance(per_day_buckets.get(day, {}), dict) else {}
+            sample_count_by_day[day] += denom
+            win_count_by_day[day] += wins
+            bucket_count_by_day[day]["down_gt_5"] += int(buckets.get("down_gt_5", 0) or 0)
+            bucket_count_by_day[day]["down_0_5"] += int(buckets.get("down_0_5", 0) or 0)
+            bucket_count_by_day[day]["up_0_5"] += int(buckets.get("up_0_5", 0) or 0)
+            bucket_count_by_day[day]["up_gt_5"] += int(buckets.get("up_gt_5", 0) or 0)
+
+    if evaluated_bars_total <= 0:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="No bars found in the requested date range (or insufficient bars for indicators).",
+            details={
+                "timeframe": timeframe,
+                "startDate": payload.startDate,
+                "endDate": payload.endDate,
+            },
+        )
+
+    win_rate_by_day: dict[int, float] = {}
+    bucket_rate_by_day: dict[int, LowVolumeBucketRate] = {}
+    for day in range(1, horizon + 1):
+        denom = sample_count_by_day.get(day, 0) or 0
+        if denom <= 0:
+            continue
+        win_rate_by_day[day] = float((win_count_by_day.get(day, 0) or 0) / denom)
+        counts = bucket_count_by_day[day]
+        bucket_rate_by_day[day] = LowVolumeBucketRate(
+            down_gt_5=float((counts.get("down_gt_5", 0) or 0) / denom),
+            down_0_5=float((counts.get("down_0_5", 0) or 0) / denom),
+            up_0_5=float((counts.get("up_0_5", 0) or 0) / denom),
+            up_gt_5=float((counts.get("up_gt_5", 0) or 0) / denom),
+        )
+
+    summary = LowVolumePullbackBacktestRangeSummary(
+        universeSize=len(unique_symbols),
+        evaluatedBars=evaluated_bars_total,
+        triggeredEvents=triggered_events_total,
+        sampleCountByDay=sample_count_by_day,
+        winRateByDay=win_rate_by_day,
+        bucketRateByDay=bucket_rate_by_day,
+    )
+
+    return LowVolumePullbackBacktestRangeResponse(
+        timeframe=timeframe,
+        startTs=int(start_dt.timestamp()),
+        endTs=int(end_dt.timestamp()),
+        horizonBars=horizon,
+        entryExecution=entry_execution,  # type: ignore[arg-type]
+        params=resolved_params_model,
+        summary=summary,
     )

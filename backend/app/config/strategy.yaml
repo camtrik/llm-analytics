@@ -15,6 +15,14 @@ low_volume_pullback:
     horizonBars: 5
     entryExecution: "close" # close | next_open
 
+  rangeBacktest:
+    autoRefreshIfMissing: false
+    horizonBars: 5
+    entryExecution: "close" # close | next_open
+    bucketThresholdPct: 0.05
+    params:
+      lookbackBars: 1
+
   params:
     fastMA: 5
     slowMA: 10

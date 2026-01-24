@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -151,3 +152,55 @@ class LowVolumePullbackBacktestResponse(BaseModel):
     params: LowVolumePullbackParamsModel
     summary: LowVolumePullbackBacktestSummary
     results: list[LowVolumePullbackBacktestResult]
+
+
+class LowVolumeBucketRate(BaseModel):
+    down_gt_5: float = 0.0
+    down_0_5: float = 0.0
+    up_0_5: float = 0.0
+    up_gt_5: float = 0.0
+
+
+class LowVolumePullbackBacktestRangeRequest(BaseModel):
+    timeframe: str | None = None
+    startDate: str
+    endDate: str
+    tickers: list[str] | None = None
+    horizonBars: int | None = None
+    entryExecution: EntryExecution | None = None
+    params: LowVolumePullbackParamsPatchModel | None = None
+
+    @model_validator(mode="after")
+    def _validate_range(self) -> "LowVolumePullbackBacktestRangeRequest":
+        try:
+            start = datetime.fromisoformat(self.startDate).date()
+            end = datetime.fromisoformat(self.endDate).date()
+        except ValueError as exc:
+            raise ValueError("Invalid startDate/endDate format. Expected YYYY-MM-DD.") from exc
+        if start > end:
+            raise ValueError("startDate must be <= endDate.")
+        if self.horizonBars is not None:
+            if self.horizonBars < 1:
+                raise ValueError("horizonBars must be >= 1")
+            if self.horizonBars > 20:
+                raise ValueError("horizonBars must be <= 20")
+        return self
+
+
+class LowVolumePullbackBacktestRangeSummary(BaseModel):
+    universeSize: int
+    evaluatedBars: int
+    triggeredEvents: int
+    sampleCountByDay: dict[int, int] = Field(default_factory=dict)
+    winRateByDay: dict[int, float] = Field(default_factory=dict)
+    bucketRateByDay: dict[int, LowVolumeBucketRate] = Field(default_factory=dict)
+
+
+class LowVolumePullbackBacktestRangeResponse(BaseModel):
+    timeframe: str
+    startTs: int
+    endTs: int
+    horizonBars: int
+    entryExecution: EntryExecution
+    params: LowVolumePullbackParamsModel
+    summary: LowVolumePullbackBacktestRangeSummary
