@@ -1,0 +1,19 @@
+runtime_dir: var
+max_limit: 5000
+feed_max_tickers: 50
+cors_origins:
+  - "http://localhost:3000"
+  - "http://127.0.0.1:3000"
+
+llm:
+  default_provider: "gpt" # or "deepseek"
+
+  gpt:
+    base_url: "https://api.openai.com/v1"
+    api_key: "YOUR_OPENAI_API_KEY"
+    model: "gpt-4o-mini"
+
+  deepseek:
+    base_url: "https://api.deepseek.com/v1"
+    api_key: "YOUR_DEEPSEEK_API_KEY"
+    model: "deepseek-chat"
