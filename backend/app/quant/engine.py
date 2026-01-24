@@ -198,7 +198,7 @@ def _run_strategy_on_bars(
         details={"name": name},
     )
 
-
+# TODO: Move it to utils for other strategies 
 def _bars_to_df(bars: Iterable[Bar]) -> pd.DataFrame:
     records = []
     for bar in bars:
