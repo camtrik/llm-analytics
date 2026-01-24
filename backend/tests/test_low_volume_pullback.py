@@ -15,7 +15,10 @@ for path in (ROOT, BACKEND):
 
 import pandas as pd
 
-from app.strategy.low_volume_pullback import LowVolumePullbackParams, _detect_low_volume_pullback
+from app.strategy.low_volume_pullback import (
+    LowVolumePullbackParams,
+    detect_low_volume_pullback_hits,
+)
 
 
 def _make_df(closes: list[float], volumes: list[float]) -> pd.DataFrame:
@@ -54,7 +57,6 @@ class LowVolumePullbackTests(unittest.TestCase):
             vol_ratio_max=0.5,
             min_body_pct=0.01,  # 1%
             min_range_pct=None,
-            lookback_bars=3,
             eps=1e-12,
         )
 
@@ -64,7 +66,12 @@ class LowVolumePullbackTests(unittest.TestCase):
         volumes = [1000, 1000, 900, 950, 1000, 1000, 300, 300]
         df = _make_df(closes, volumes)
 
-        result = _detect_low_volume_pullback(df, self.params)
+        result = detect_low_volume_pullback_hits(
+            df,
+            self.params,
+            end_idx=len(df) - 1,
+            recent_bars=3,
+        )
 
         self.assertTrue(result["triggered"])
         hits = result.get("hits", [])
@@ -81,7 +88,12 @@ class LowVolumePullbackTests(unittest.TestCase):
         volumes = [1000, 1000, 900, 950, 1000, 980, 1200, 1500]
         df = _make_df(closes, volumes)
 
-        result = _detect_low_volume_pullback(df, self.params)
+        result = detect_low_volume_pullback_hits(
+            df,
+            self.params,
+            end_idx=len(df) - 1,
+            recent_bars=3,
+        )
 
         self.assertFalse(result["triggered"])
         self.assertEqual(result.get("hits"), [])

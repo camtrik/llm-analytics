@@ -60,7 +60,6 @@ class LowVolumePullbackRangeBacktestTests(unittest.TestCase):
             vol_ratio_max=0.5,
             min_body_pct=0.01,
             min_range_pct=None,
-            lookback_bars=1,
             eps=1e-12,
         )
 
@@ -127,4 +126,3 @@ class LowVolumePullbackRangeBacktestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

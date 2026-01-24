@@ -60,7 +60,6 @@ class LowVolumePullbackBacktestTests(unittest.TestCase):
             vol_ratio_max=0.5,
             min_body_pct=0.01,
             min_range_pct=None,
-            lookback_bars=3,
             eps=1e-12,
         )
 
@@ -76,6 +75,7 @@ class LowVolumePullbackBacktestTests(unittest.TestCase):
             df=df,
             params=self.params,
             cutoff_dt=cutoff,
+            recent_bars=3,
             horizon_bars=2,
             entry_execution="close",
         )
@@ -107,6 +107,7 @@ class LowVolumePullbackBacktestTests(unittest.TestCase):
             df=df,
             params=self.params,
             cutoff_dt=cutoff,
+            recent_bars=3,
             horizon_bars=2,
             entry_execution="next_open",
         )
@@ -120,4 +121,3 @@ class LowVolumePullbackBacktestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
