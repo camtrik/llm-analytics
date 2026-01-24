@@ -1,0 +1,29 @@
+low_volume_pullback:
+  timeframe: "6M_1d"
+
+  universe:
+    # Path is resolved relative to backend/app/config when not absolute.
+    file: "nikkei225.yml"
+
+  screener:
+    onlyTriggered: true
+    autoRefreshIfMissing: true
+
+  backtest:
+    onlyTriggered: true
+    autoRefreshIfMissing: false
+    horizonBars: 5
+    entryExecution: "close" # close | next_open
+
+  params:
+    fastMA: 5
+    slowMA: 10
+    longMA: 60
+    longMaSlopeWindow: 3
+    longMaSlopeMinPct: 0.0
+    volAvgWindow: 5
+    volRatioMax: 0.5
+    minBodyPct: 0.002
+    minRangePct: null
+    lookbackBars: 3
+    eps: 1e-12

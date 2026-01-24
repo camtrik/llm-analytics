@@ -236,6 +236,89 @@ type QuantResponse = {
   results: Record<string, QuantResultItem>;
 };
 
+type LowVolumeParams = {
+  fastMA: number;
+  slowMA: number;
+  longMA: number;
+  longMaSlopeWindow: number;
+  longMaSlopeMinPct: number;
+  volAvgWindow: number;
+  volRatioMax: number;
+  minBodyPct: number;
+  minRangePct: number | null;
+  lookbackBars: number;
+  eps: number;
+};
+
+type LowVolumeResult = {
+  symbol: string;
+  name?: string | null;
+  triggered: boolean;
+  asOf?: number | null;
+  barIndex?: number | null;
+  volRatio?: number | null;
+  bodyPct?: number | null;
+  error?: string | null;
+  hits?: LowVolumeHit[];
+};
+
+type LowVolumeHit = {
+  asOf: number;
+  barIndex: number;
+  volRatio: number;
+  bodyPct: number;
+};
+
+type LowVolumeResponse = {
+  timeframe: string;
+  params: LowVolumeParams;
+  results: LowVolumeResult[];
+};
+
+type LowVolumeBacktestEntryExecution = "close" | "next_open";
+
+type LowVolumeBacktestSignal = {
+  barIndex: number;
+  asOfTs: number;
+  entryPrice: number;
+  volRatio?: number | null;
+  bodyPct?: number | null;
+};
+
+type LowVolumeBacktestForward = {
+  day: number;
+  ts: number;
+  close: number;
+  return: number;
+};
+
+type LowVolumeBacktestResult = {
+  symbol: string;
+  name?: string | null;
+  triggered: boolean;
+  signal?: LowVolumeBacktestSignal | null;
+  forward: LowVolumeBacktestForward[];
+  error?: string | null;
+};
+
+type LowVolumeBacktestSummary = {
+  universeSize: number;
+  evaluatedCount: number;
+  triggeredCount: number;
+  avgReturnByDay: Record<string, number>;
+  winRateByDay: Record<string, number>;
+};
+
+type LowVolumeBacktestResponse = {
+  timeframe: string;
+  asOfTs: number;
+  horizonBars: number;
+  entryExecution: LowVolumeBacktestEntryExecution;
+  params: LowVolumeParams;
+  summary: LowVolumeBacktestSummary;
+  results: LowVolumeBacktestResult[];
+};
+
 async function safeParseError(res: Response) {
   try {
     const payload = await res.json();
@@ -341,6 +424,24 @@ export default function DisplayPage() {
   const [quantLoading, setQuantLoading] = useState(false);
   const [quantError, setQuantError] = useState<string | null>(null);
   const [quantResult, setQuantResult] = useState<QuantResponse | null>(null);
+  const [lvTimeframe, setLvTimeframe] = useState<string>("6M_1d");
+  const [lvOnlyTriggered, setLvOnlyTriggered] = useState<boolean>(true);
+  const [lvVolRatioMax, setLvVolRatioMax] = useState<string>("0.5");
+  const [lvLookback, setLvLookback] = useState<string>("3");
+  const [lvMinBodyPct, setLvMinBodyPct] = useState<string>("0.002");
+  const [lvResults, setLvResults] = useState<LowVolumeResult[]>([]);
+  const [lvLoading, setLvLoading] = useState(false);
+  const [lvError, setLvError] = useState<string | null>(null);
+  const [lvBtAsOfDate, setLvBtAsOfDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [lvBtHorizonBars, setLvBtHorizonBars] = useState<string>("5");
+  const [lvBtEntryExecution, setLvBtEntryExecution] =
+    useState<LowVolumeBacktestEntryExecution>("close");
+  const [lvBtOnlyTriggered, setLvBtOnlyTriggered] = useState<boolean>(true);
+  const [lvBtLoading, setLvBtLoading] = useState(false);
+  const [lvBtError, setLvBtError] = useState<string | null>(null);
+  const [lvBtResult, setLvBtResult] = useState<LowVolumeBacktestResponse | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   const apiBase =
@@ -822,6 +923,90 @@ export default function DisplayPage() {
       setQuantError(err instanceof Error ? err.message : "回测失败。");
     } finally {
       setQuantLoading(false);
+    }
+  };
+
+  const runLowVolume = async () => {
+    setLvError(null);
+    setLvLoading(true);
+    setLvResults([]);
+    try {
+      const volRatioMax = Number.parseFloat(lvVolRatioMax);
+      const lookbackBars = Number.parseInt(lvLookback, 10);
+      const minBodyPct = Number.parseFloat(lvMinBodyPct);
+      const payload = {
+        timeframe: lvTimeframe || "6M_1d",
+        tickers: null,
+        onlyTriggered: lvOnlyTriggered,
+        params: {
+          volRatioMax: Number.isFinite(volRatioMax) ? volRatioMax : 0.5,
+          minBodyPct: Number.isFinite(minBodyPct) ? minBodyPct : 0.002,
+          lookbackBars: Number.isFinite(lookbackBars) ? lookbackBars : 3,
+        },
+      };
+      const res = await fetch(`${apiBase}/api/strategy/low_volume_pullback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as LowVolumeResponse;
+      setLvResults(data.results || []);
+    } catch (err) {
+      setLvError(err instanceof Error ? err.message : "筛选失败。");
+    } finally {
+      setLvLoading(false);
+    }
+  };
+
+  const runLowVolumeBacktest = async () => {
+    if (!lvBtAsOfDate) {
+      setLvBtError("请选择回测日期。");
+      return;
+    }
+    setLvBtError(null);
+    setLvBtLoading(true);
+    setLvBtResult(null);
+    try {
+      const volRatioMax = Number.parseFloat(lvVolRatioMax);
+      const lookbackBars = Number.parseInt(lvLookback, 10);
+      const minBodyPct = Number.parseFloat(lvMinBodyPct);
+      const horizonBars = Number.parseInt(lvBtHorizonBars, 10);
+      const payload = {
+        timeframe: lvTimeframe || "6M_1d",
+        asOfDate: lvBtAsOfDate,
+        asOfTs: null,
+        tickers: null,
+        onlyTriggered: lvBtOnlyTriggered,
+        horizonBars:
+          Number.isFinite(horizonBars) && horizonBars >= 1 && horizonBars <= 20
+            ? horizonBars
+            : 5,
+        entryExecution: lvBtEntryExecution,
+        params: {
+          volRatioMax: Number.isFinite(volRatioMax) ? volRatioMax : 0.5,
+          minBodyPct: Number.isFinite(minBodyPct) ? minBodyPct : 0.002,
+          lookbackBars: Number.isFinite(lookbackBars) ? lookbackBars : 3,
+        },
+      };
+      const res = await fetch(`${apiBase}/api/strategy/low_volume_pullback/backtest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await safeParseError(res);
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as LowVolumeBacktestResponse;
+      setLvBtResult(data);
+    } catch (err) {
+      setLvBtError(err instanceof Error ? err.message : "回测失败。");
+    } finally {
+      setLvBtLoading(false);
     }
   };
 
@@ -1322,6 +1507,374 @@ export default function DisplayPage() {
           </section>
 
           <section className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">Low-Volume Pullback Screener</h3>
+                <p className="text-xs text-slate-500">
+                  复用本地缓存批量筛选缩量回调阴线（默认日经225，可选当前勾选列表）。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <label className="text-xs font-medium text-slate-700">Timeframe</label>
+                <select
+                  value={lvTimeframe}
+                  onChange={(event) => setLvTimeframe(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                >
+                  {(sortedTimeframes.length ? sortedTimeframes : ["6M_1d"]).map((tf) => (
+                    <option key={tf} value={tf}>
+                      {tf}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                <div className="font-semibold text-slate-700">过滤</div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={lvOnlyTriggered}
+                      onChange={(e) => setLvOnlyTriggered(e.target.checked)}
+                      className="h-4 w-4 accent-slate-900"
+                    />
+                    仅显示命中
+                  </label>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span>VOL_RATIO ≤</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={lvVolRatioMax}
+                    onChange={(e) => setLvVolRatioMax(e.target.value)}
+                    className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span>Lookback</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={lvLookback}
+                    onChange={(e) => setLvLookback(e.target.value)}
+                    className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span>minBodyPct</span>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={lvMinBodyPct}
+                    onChange={(e) => setLvMinBodyPct(e.target.value)}
+                    className="w-24 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-slate-400"
+                  />
+                </div>
+                <p className="mt-3 text-[11px] text-slate-500">
+                  默认筛选日经225全量；名单可在 backend/app/config/strategy.yaml 中配置。
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                <div className="font-semibold text-slate-700">趋势口径</div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  趋势/均线窗口等默认使用后端配置（`backend/app/config/strategy.yaml`），这里只暴露常用阈值做快速调参。
+                </p>
+                <div className="mt-2 text-[11px] text-slate-500">
+                  自动使用本地缓存；若缺失会后台拉取 yfinance 并入库（可能稍慢）。
+                </div>
+              </div>
+              <div className="flex flex-col justify-end gap-2 text-xs text-slate-700">
+                <button
+                  type="button"
+                  onClick={runLowVolume}
+                  disabled={lvLoading}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {lvLoading ? "筛选中..." : "运行筛选"}
+                </button>
+                {lvError && <p className="text-xs text-rose-500">{lvError}</p>}
+                {!lvError && !lvLoading && !lvResults.length && (
+                  <p className="text-xs text-slate-500">尚无结果，点击运行开始筛选。</p>
+                )}
+              </div>
+            </div>
+
+            {lvResults.length > 0 && (
+              <div className="mt-4 overflow-auto rounded-xl border border-slate-200 bg-white">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Ticker</th>
+                      <th className="px-3 py-2 text-left">状态</th>
+                      <th className="px-3 py-2 text-left">命中</th>
+                      <th className="px-3 py-2 text-left">时间</th>
+                      <th className="px-3 py-2 text-right">VOL_RATIO</th>
+                      <th className="px-3 py-2 text-right">Body%</th>
+                      <th className="px-3 py-2 text-left">错误</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lvResults.map((item) => (
+                      <tr key={item.symbol} className="border-b border-slate-100">
+                        <td className="px-3 py-2">
+                          <div className="font-medium text-slate-800">{item.symbol}</div>
+                          {item.name && (
+                            <div className="text-xs text-slate-500">{item.name}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {item.error ? (
+                            <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-700">
+                              未判定
+                            </span>
+                          ) : item.triggered ? (
+                            <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
+                              命中
+                            </span>
+                          ) : (
+                            <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                              未命中
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-600">
+                          {item.hits && item.hits.length > 0 ? (
+                            <div className="space-y-1">
+                              <div className="font-medium text-slate-800">
+                                {item.hits.length} 次
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {item.hits.slice(0, 4).map((hit, idx) => (
+                                  <span
+                                    key={`${item.symbol}-${hit.barIndex}-${idx}`}
+                                    className="rounded bg-slate-100 px-2 py-1 text-[11px] text-slate-700"
+                                  >
+                                    {formatTimestamp(hit.asOf)}
+                                  </span>
+                                ))}
+                                {item.hits.length > 4 && (
+                                  <span className="text-[11px] text-slate-500">
+                                    +{item.hits.length - 4}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-600">
+                          {formatTimestamp(item.asOf ?? null)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-slate-700">
+                          {item.volRatio !== null && item.volRatio !== undefined
+                            ? item.volRatio.toFixed(2)
+                            : "-"}
+                        </td>
+                        <td className="px-3 py-2 text-right text-slate-700">
+                          {item.bodyPct !== null && item.bodyPct !== undefined
+                            ? `${(item.bodyPct * 100).toFixed(2)}%`
+                            : "-"}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-rose-500">
+                          {item.error || ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Backtest</h4>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    以 asOf 截止日（含当日及之前）计算信号，再从“命中阴线的下一根 bar”
+                    开始统计后续 1～N 根 bar 的走势。
+                    如提示 cache_not_ready，请先预加载日经225的对应 timeframe 数据。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={runLowVolumeBacktest}
+                  disabled={lvBtLoading}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {lvBtLoading ? "回测中..." : "运行回测"}
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-700">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">asOf</label>
+                  <input
+                    type="date"
+                    value={lvBtAsOfDate}
+                    onChange={(e) => setLvBtAsOfDate(e.target.value)}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">Horizon</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={lvBtHorizonBars}
+                    onChange={(e) => setLvBtHorizonBars(e.target.value)}
+                    className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-slate-700">Entry</label>
+                  <select
+                    value={lvBtEntryExecution}
+                    onChange={(e) =>
+                      setLvBtEntryExecution(
+                        e.target.value as LowVolumeBacktestEntryExecution
+                      )
+                    }
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                  >
+                    <option value="close">close</option>
+                    <option value="next_open">next_open</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={lvBtOnlyTriggered}
+                    onChange={(e) => setLvBtOnlyTriggered(e.target.checked)}
+                    className="h-4 w-4 accent-slate-900"
+                  />
+                  仅返回命中
+                </label>
+              </div>
+
+              {lvBtError && <p className="mt-3 text-xs text-rose-500">{lvBtError}</p>}
+
+              {lvBtResult && (
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-semibold text-slate-800">Summary</div>
+                      <div className="text-slate-600">
+                        asOf(bar): {formatTimestamp(lvBtResult.asOfTs)} · universe{" "}
+                        {lvBtResult.summary.universeSize} · triggered{" "}
+                        {lvBtResult.summary.triggeredCount}
+                      </div>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600 md:grid-cols-4">
+                      {Object.entries(lvBtResult.summary.avgReturnByDay || {}).map(
+                        ([day, value]) => (
+                          <div key={`avg-${day}`}>
+                            D+{day} avg: {(value * 100).toFixed(2)}%
+                          </div>
+                        )
+                      )}
+                      {Object.entries(lvBtResult.summary.winRateByDay || {}).map(
+                        ([day, value]) => (
+                          <div key={`win-${day}`}>D+{day} win: {(value * 100).toFixed(0)}%</div>
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="overflow-auto rounded-xl border border-slate-200">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Ticker</th>
+                          <th className="px-3 py-2 text-left">Signal</th>
+                          <th className="px-3 py-2 text-right">Entry</th>
+                          {Array.from(
+                            { length: lvBtResult.horizonBars },
+                            (_, i) => i + 1
+                          ).map((day) => (
+                            <th key={`d-${day}`} className="px-3 py-2 text-right">
+                              D+{day}
+                            </th>
+                          ))}
+                          <th className="px-3 py-2 text-left">错误</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lvBtResult.results.map((item) => (
+                          <tr key={`bt-${item.symbol}`} className="border-b border-slate-100">
+                            <td className="px-3 py-2">
+                              <div className="font-medium text-slate-800">{item.symbol}</div>
+                              {item.name && (
+                                <div className="text-xs text-slate-500">{item.name}</div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-slate-600">
+                              {item.signal ? formatTimestamp(item.signal.asOfTs) : "-"}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-700">
+                              {item.signal?.entryPrice !== undefined &&
+                              item.signal?.entryPrice !== null &&
+                              Number.isFinite(item.signal.entryPrice)
+                                ? item.signal.entryPrice.toFixed(2)
+                                : "-"}
+                            </td>
+                            {Array.from(
+                              { length: lvBtResult.horizonBars },
+                              (_, i) => i + 1
+                            ).map((day) => {
+                              const point = item.forward.find((p) => p.day === day);
+                              if (!point) {
+                                return (
+                                  <td key={`r-${item.symbol}-${day}`} className="px-3 py-2 text-right text-slate-400">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = point.return * 100;
+                              const cls =
+                                pct > 0
+                                  ? "text-emerald-700"
+                                  : pct < 0
+                                    ? "text-rose-600"
+                                    : "text-slate-600";
+                              return (
+                                <td
+                                  key={`r-${item.symbol}-${day}`}
+                                  className={`px-3 py-2 text-right ${cls}`}
+                                >
+                                  {pct.toFixed(2)}%
+                                </td>
+                              );
+                            })}
+                            <td className="px-3 py-2 text-xs text-rose-500">
+                              {item.error || ""}
+                            </td>
+                          </tr>
+                        ))}
+                        {!lvBtResult.results.length && (
+                          <tr>
+                            <td
+                              colSpan={4 + lvBtResult.horizonBars}
+                              className="px-3 py-6 text-center text-xs text-slate-500"
+                            >
+                              无回测结果（可能当日无命中）。
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold">LLM Analysis</h3>
@@ -1373,7 +1926,7 @@ export default function DisplayPage() {
                     !cacheReady ||
                     !selectedProvider ||
                     providersLoading ||
-                    (activeProviderInfo && !activeProviderInfo.available)
+                    (activeProviderInfo ? !activeProviderInfo.available : false)
                   }
                   className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >

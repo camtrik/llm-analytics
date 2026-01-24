@@ -1,34 +1,79 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config.settings import load_settings
 from app.config.timeframes import TIMEFRAME_COMBOS
 from app.data.market_cache import MarketCache
 from app.errors import ApiError
+from app.quant.engine import _bars_to_df
 from app.strategy.low_volume_pullback import (
     LowVolumePullbackParams,
+    backtest_low_volume_pullback_on_df,
     load_tickers,
     screen_low_volume_pullback,
 )
 from app.strategy.schema import (
+    LowVolumePullbackBacktestForwardPoint,
+    LowVolumePullbackBacktestRequest,
+    LowVolumePullbackBacktestResponse,
+    LowVolumePullbackBacktestResult,
+    LowVolumePullbackBacktestSignal,
+    LowVolumePullbackBacktestSummary,
     LowVolumeHit,
     LowVolumePullbackParamsModel,
+    LowVolumePullbackParamsPatchModel,
     LowVolumePullbackRequest,
     LowVolumePullbackResponse,
     LowVolumePullbackResult,
 )
+from app.strategy.strategy_config import get_low_volume_pullback_config, resolve_universe_file
 
 _settings = load_settings()
 _cache = MarketCache(_settings.runtime_dir / "market_cache", TIMEFRAME_COMBOS)
 _timeframe_map = {tf.name: tf for tf in TIMEFRAME_COMBOS}
-_default_ticker_file = Path(__file__).resolve().parents[1] / "config" / "nikkei225.yml"
+
+
+def _fallback_universe_file() -> Path:
+    return Path(__file__).resolve().parents[1] / "config" / "nikkei225.yml"
+
+
+def _universe_file_from_config() -> Path:
+    cfg = get_low_volume_pullback_config()
+    universe_cfg = cfg.get("universe", {})
+    file_value = universe_cfg.get("file") if isinstance(universe_cfg, dict) else None
+    resolved = resolve_universe_file(str(file_value)) if file_value else None
+    return resolved or _fallback_universe_file()
+
+
+def _default_timeframe_from_config() -> str:
+    cfg = get_low_volume_pullback_config()
+    tf = cfg.get("timeframe")
+    return str(tf).strip() if tf else "6M_1d"
+
+
+def _resolve_params_from_config(
+    overrides: LowVolumePullbackParamsPatchModel | None,
+) -> LowVolumePullbackParamsModel:
+    cfg = get_low_volume_pullback_config()
+    params_cfg = cfg.get("params", {})
+    base = (
+        LowVolumePullbackParamsModel(**params_cfg)
+        if isinstance(params_cfg, dict) and params_cfg
+        else LowVolumePullbackParamsModel()
+    )
+    if not overrides:
+        return base
+    merged = {**base.model_dump(), **overrides.model_dump(exclude_none=True)}
+    return LowVolumePullbackParamsModel(**merged)
 
 
 def _default_tickers() -> list[dict[str, str]]:
-    if not _default_ticker_file.exists():
+    path = _universe_file_from_config()
+    if not path.exists():
         return []
-    return load_tickers(_default_ticker_file)
+    return load_tickers(path)
 
 
 def _build_name_map(defaults: list[dict[str, str]]) -> dict[str, str]:
@@ -63,7 +108,8 @@ def _ensure_cache_ready(symbols: list[str], timeframe: str) -> None:
 
 
 def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackResponse:
-    timeframe = payload.timeframe
+    cfg = get_low_volume_pullback_config()
+    timeframe = (payload.timeframe or _default_timeframe_from_config()).strip()
     if timeframe not in _timeframe_map:
         raise ApiError(
             status_code=404,
@@ -71,6 +117,15 @@ def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackR
             message="Timeframe not supported.",
             details={"timeframe": timeframe},
         )
+
+    screener_cfg = cfg.get("screener", {}) if isinstance(cfg.get("screener"), dict) else {}
+    only_triggered_default = bool(screener_cfg.get("onlyTriggered", False))
+    auto_refresh = bool(screener_cfg.get("autoRefreshIfMissing", True))
+    only_triggered = (
+        payload.onlyTriggered
+        if payload.onlyTriggered is not None
+        else only_triggered_default
+    )
 
     defaults = _default_tickers()
     name_map = _build_name_map(defaults)
@@ -91,7 +146,8 @@ def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackR
             message="tickers is required (default list empty).",
         )
 
-    params: LowVolumePullbackParams = payload.params.to_params()
+    resolved_params_model = _resolve_params_from_config(payload.params)
+    params: LowVolumePullbackParams = resolved_params_model.to_params()
     seen = set()
     unique_symbols = []
     for sym in symbols:
@@ -101,8 +157,10 @@ def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackR
         seen.add(s)
         unique_symbols.append(s)
 
-    # 如果缓存缺失/过期，自动刷新再读取
-    _ensure_cache_ready(unique_symbols, timeframe)
+    if auto_refresh:
+        _ensure_cache_ready(unique_symbols, timeframe)
+    else:
+        _cache.get_bars_batch(unique_symbols, timeframe)
 
     raw_results = list(
         screen_low_volume_pullback(
@@ -141,11 +199,229 @@ def low_volume_pullback(payload: LowVolumePullbackRequest) -> LowVolumePullbackR
         )
         results.append(result)
 
-    if payload.onlyTriggered:
+    if only_triggered:
         results = [item for item in results if item.triggered]
 
     return LowVolumePullbackResponse(
         timeframe=timeframe,
-        params=LowVolumePullbackParamsModel(**payload.params.model_dump()),
+        params=resolved_params_model,
+        results=results,
+    )
+
+
+def _resolve_cutoff_dt(payload: LowVolumePullbackBacktestRequest) -> datetime:
+    if payload.asOfTs is not None:
+        return datetime.fromtimestamp(int(payload.asOfTs), tz=timezone.utc)
+    if payload.asOfDate:
+        try:
+            as_of_date = datetime.fromisoformat(payload.asOfDate).date()
+        except ValueError as exc:
+            raise ApiError(
+                status_code=400,
+                error="invalid_request",
+                message="Invalid asOfDate format. Expected YYYY-MM-DD.",
+                details={"asOfDate": payload.asOfDate},
+            ) from exc
+        return datetime(
+            as_of_date.year,
+            as_of_date.month,
+            as_of_date.day,
+            23,
+            59,
+            59,
+            tzinfo=timezone.utc,
+        )
+    raise ApiError(
+        status_code=400,
+        error="invalid_request",
+        message="Provide exactly one of asOfDate or asOfTs.",
+    )
+
+
+def low_volume_pullback_backtest(
+    payload: LowVolumePullbackBacktestRequest,
+) -> LowVolumePullbackBacktestResponse:
+    cfg = get_low_volume_pullback_config()
+    timeframe = (payload.timeframe or _default_timeframe_from_config()).strip()
+    if timeframe not in _timeframe_map:
+        raise ApiError(
+            status_code=404,
+            error="not_found",
+            message="Timeframe not supported.",
+            details={"timeframe": timeframe},
+        )
+
+    defaults = _default_tickers()
+    name_map = _build_name_map(defaults)
+    default_symbols = [item["symbol"] for item in defaults if "symbol" in item]
+    symbols = list(default_symbols)
+
+    if payload.tickers:
+        for sym in payload.tickers:
+            s = str(sym).strip()
+            if s and s not in symbols:
+                symbols.append(s)
+
+    if not symbols:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="tickers is required (default list empty).",
+        )
+
+    seen = set()
+    unique_symbols: list[str] = []
+    for sym in symbols:
+        s = str(sym).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        unique_symbols.append(s)
+
+    cutoff_dt = _resolve_cutoff_dt(payload)
+    backtest_cfg = cfg.get("backtest", {}) if isinstance(cfg.get("backtest"), dict) else {}
+    only_triggered_default = bool(backtest_cfg.get("onlyTriggered", True))
+    auto_refresh = bool(backtest_cfg.get("autoRefreshIfMissing", False))
+    horizon_default = int(backtest_cfg.get("horizonBars", 5))
+    entry_execution_default = str(backtest_cfg.get("entryExecution", "close"))
+
+    horizon = int(payload.horizonBars if payload.horizonBars is not None else horizon_default)
+    entry_execution = payload.entryExecution or entry_execution_default  # type: ignore[assignment]
+    if entry_execution not in {"close", "next_open"}:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="entryExecution must be close or next_open.",
+            details={"entryExecution": entry_execution},
+        )
+    only_triggered = (
+        payload.onlyTriggered
+        if payload.onlyTriggered is not None
+        else only_triggered_default
+    )
+
+    resolved_params_model = _resolve_params_from_config(payload.params)
+    params = resolved_params_model.to_params()
+
+    if auto_refresh:
+        _ensure_cache_ready(unique_symbols, timeframe)
+    bars_by_symbol = _cache.get_bars_batch(unique_symbols, timeframe)
+
+    results: list[LowVolumePullbackBacktestResult] = []
+    returns_by_day: dict[int, list[float]] = {day: [] for day in range(1, horizon + 1)}
+    evaluated_count = 0
+    triggered_count = 0
+    resolved_asof_ts: int | None = None
+
+    for symbol in unique_symbols:
+        bars = bars_by_symbol.get(symbol, [])
+        df = _bars_to_df(bars)
+        if df.empty:
+            if not only_triggered:
+                results.append(
+                    LowVolumePullbackBacktestResult(
+                        symbol=symbol,
+                        name=name_map.get(symbol),
+                        triggered=False,
+                        error="no_bars",
+                    )
+                )
+            continue
+
+        bt = backtest_low_volume_pullback_on_df(
+            df=df,
+            params=params,
+            cutoff_dt=cutoff_dt,
+            horizon_bars=horizon,
+            entry_execution=entry_execution,
+        )
+        evaluated_count += 1
+
+        end_ts = bt.get("end_ts")
+        if resolved_asof_ts is None and isinstance(end_ts, (int, float)):
+            resolved_asof_ts = int(end_ts)
+
+        if not bt.get("triggered"):
+            if not only_triggered:
+                results.append(
+                    LowVolumePullbackBacktestResult(
+                        symbol=symbol,
+                        name=name_map.get(symbol),
+                        triggered=False,
+                        error=bt.get("error"),
+                    )
+                )
+            continue
+
+        triggered_count += 1
+        signal = LowVolumePullbackBacktestSignal(
+            barIndex=int(bt.get("signal_idx")),
+            asOfTs=int(bt.get("signal_ts")),
+            entryPrice=float(bt.get("entry_price")),
+            volRatio=bt.get("vol_ratio"),
+            bodyPct=bt.get("body_pct"),
+        )
+        forward: list[LowVolumePullbackBacktestForwardPoint] = []
+        for item in bt.get("forward", []) or []:
+            if not isinstance(item, dict):
+                continue
+            day = item.get("day")
+            ts = item.get("ts")
+            close = item.get("close")
+            ret = item.get("return")
+            if day is None or ts is None or close is None or ret is None:
+                continue
+            day_int = int(day)
+            forward.append(
+                LowVolumePullbackBacktestForwardPoint(
+                    day=day_int,
+                    ts=int(ts),
+                    close=float(close),
+                    return_=float(ret),
+                )
+            )
+            if day_int in returns_by_day:
+                returns_by_day[day_int].append(float(ret))
+
+        results.append(
+            LowVolumePullbackBacktestResult(
+                symbol=symbol,
+                name=name_map.get(symbol),
+                triggered=True,
+                signal=signal,
+                forward=forward,
+                error=bt.get("error"),
+            )
+        )
+
+    if resolved_asof_ts is None:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message="asOf is earlier than available bars.",
+        )
+
+    avg_by_day: dict[int, float] = {}
+    win_by_day: dict[int, float] = {}
+    for day, vals in returns_by_day.items():
+        if not vals:
+            continue
+        avg_by_day[day] = float(sum(vals) / len(vals))
+        win_by_day[day] = float(sum(1 for v in vals if v > 0) / len(vals))
+
+    summary = LowVolumePullbackBacktestSummary(
+        universeSize=len(unique_symbols),
+        evaluatedCount=evaluated_count,
+        triggeredCount=triggered_count,
+        avgReturnByDay=avg_by_day,
+        winRateByDay=win_by_day,
+    )
+    return LowVolumePullbackBacktestResponse(
+        timeframe=timeframe,
+        asOfTs=resolved_asof_ts,
+        horizonBars=horizon,
+        entryExecution=entry_execution,  # type: ignore[arg-type]
+        params=resolved_params_model,
+        summary=summary,
         results=results,
     )

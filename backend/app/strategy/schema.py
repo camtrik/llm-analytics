@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.strategy.low_volume_pullback import LowVolumePullbackParams
 
@@ -34,6 +36,20 @@ class LowVolumePullbackParamsModel(BaseModel):
         )
 
 
+class LowVolumePullbackParamsPatchModel(BaseModel):
+    fastMA: int | None = None
+    slowMA: int | None = None
+    longMA: int | None = None
+    longMaSlopeWindow: int | None = None
+    longMaSlopeMinPct: float | None = None
+    volAvgWindow: int | None = None
+    volRatioMax: float | None = None
+    minBodyPct: float | None = None
+    minRangePct: float | None = None
+    lookbackBars: int | None = None
+    eps: float | None = None
+
+
 class LowVolumePullbackResult(BaseModel):
     symbol: str
     name: str | None = None
@@ -54,13 +70,84 @@ class LowVolumeHit(BaseModel):
 
 
 class LowVolumePullbackRequest(BaseModel):
-    timeframe: str = "6M_1d"
+    timeframe: str | None = None
     tickers: list[str] | None = None
-    params: LowVolumePullbackParamsModel = Field(default_factory=LowVolumePullbackParamsModel)
-    onlyTriggered: bool = False
+    params: LowVolumePullbackParamsPatchModel | None = None
+    onlyTriggered: bool | None = None
 
 
 class LowVolumePullbackResponse(BaseModel):
     timeframe: str
     params: LowVolumePullbackParamsModel
     results: list[LowVolumePullbackResult]
+
+
+EntryExecution = Literal["close", "next_open"]
+
+
+class LowVolumePullbackBacktestRequest(BaseModel):
+    timeframe: str | None = None
+    asOfDate: str | None = None
+    asOfTs: int | None = None
+    tickers: list[str] | None = None
+    onlyTriggered: bool | None = None
+    horizonBars: int | None = None
+    entryExecution: EntryExecution | None = None
+    params: LowVolumePullbackParamsPatchModel | None = None
+
+    @model_validator(mode="after")
+    def _validate_asof(self) -> "LowVolumePullbackBacktestRequest":
+        has_date = bool(self.asOfDate)
+        has_ts = self.asOfTs is not None
+        if has_date == has_ts:
+            raise ValueError("Provide exactly one of asOfDate or asOfTs.")
+        if self.horizonBars is not None:
+            if self.horizonBars < 1:
+                raise ValueError("horizonBars must be >= 1")
+            if self.horizonBars > 20:
+                raise ValueError("horizonBars must be <= 20")
+        return self
+
+
+class LowVolumePullbackBacktestSignal(BaseModel):
+    barIndex: int
+    asOfTs: int
+    entryPrice: float
+    volRatio: float | None = None
+    bodyPct: float | None = None
+
+
+class LowVolumePullbackBacktestForwardPoint(BaseModel):
+    day: int
+    ts: int
+    close: float
+    return_: float = Field(alias="return")
+
+    model_config = {"populate_by_name": True}
+
+
+class LowVolumePullbackBacktestResult(BaseModel):
+    symbol: str
+    name: str | None = None
+    triggered: bool
+    signal: LowVolumePullbackBacktestSignal | None = None
+    forward: list[LowVolumePullbackBacktestForwardPoint] = Field(default_factory=list)
+    error: str | None = None
+
+
+class LowVolumePullbackBacktestSummary(BaseModel):
+    universeSize: int
+    evaluatedCount: int
+    triggeredCount: int
+    avgReturnByDay: dict[int, float] = Field(default_factory=dict)
+    winRateByDay: dict[int, float] = Field(default_factory=dict)
+
+
+class LowVolumePullbackBacktestResponse(BaseModel):
+    timeframe: str
+    asOfTs: int
+    horizonBars: int
+    entryExecution: EntryExecution
+    params: LowVolumePullbackParamsModel
+    summary: LowVolumePullbackBacktestSummary
+    results: list[LowVolumePullbackBacktestResult]
