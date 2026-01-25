@@ -11,13 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getJson, API_BASE } from "@/lib/api";
-
-type OptionsResponse = {
-  tickers: string[];
-  timeframes: string[];
-  tickerInfo: Record<string, string>;
-};
+import { API_BASE } from "@/lib/api";
+import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
 type LowVolumeResult = {
   symbol: string;
@@ -35,7 +30,7 @@ type LowVolumeResponse = {
 };
 
 export default function LowVolumeScreenerPage() {
-  const [options, setOptions] = useState<OptionsResponse | null>(null);
+  const [universe, setUniverse] = useState<UniverseResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<LowVolumeResult[]>([]);
@@ -44,12 +39,15 @@ export default function LowVolumeScreenerPage() {
   const [onlyTriggered, setOnlyTriggered] = useState(true);
   const [volRatioMax, setVolRatioMax] = useState("0.5");
   const [minBodyPct, setMinBodyPct] = useState("0.002");
+  const [recentBars, setRecentBars] = useState("3");
 
   useEffect(() => {
-    getJson<OptionsResponse>("/api/options")
+    fetchUniverse()
       .then((res) => {
-        setOptions(res);
-        setTimeframe(res.timeframes[0] || "6M_1d");
+        setUniverse(res);
+        const preferred = "6M_1d";
+        const fallback = res.timeframes?.[0] ?? "";
+        setTimeframe(res.timeframes?.includes(preferred) ? preferred : fallback);
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -63,6 +61,7 @@ export default function LowVolumeScreenerPage() {
         timeframe,
         tickers: null,
         onlyTriggered,
+        recentBars: parseInt(recentBars, 10) || undefined,
         params: {
           volRatioMax: parseFloat(volRatioMax),
           minBodyPct: parseFloat(minBodyPct),
@@ -83,7 +82,7 @@ export default function LowVolumeScreenerPage() {
     }
   };
 
-  const tickerInfo = options?.tickerInfo ?? {};
+  const tickerInfo = universe?.tickerInfo ?? {};
 
   const triggered = useMemo(() => results.filter((r) => r.triggered), [results]);
 
@@ -118,7 +117,7 @@ export default function LowVolumeScreenerPage() {
               onChange={(e) => setTimeframe(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              {(options?.timeframes || []).map((tf) => (
+              {(universe?.timeframes || []).map((tf) => (
                 <option key={tf} value={tf}>
                   {tf}
                 </option>
@@ -132,6 +131,10 @@ export default function LowVolumeScreenerPage() {
           <div className="space-y-2">
             <Label>minBodyPct</Label>
             <Input value={minBodyPct} onChange={(e) => setMinBodyPct(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>recentBars</Label>
+            <Input value={recentBars} onChange={(e) => setRecentBars(e.target.value)} />
           </div>
           <div className="space-y-2">
             <Label>仅显示命中</Label>
@@ -173,7 +176,7 @@ export default function LowVolumeScreenerPage() {
                 <TableRow key={`${r.symbol}-${idx}`}>
                   <TableCell>
                     <div className="font-medium">{r.symbol}</div>
-                    <div className="text-xs text-muted-foreground">{tickerInfo[r.symbol]}</div>
+                    <div className="text-xs text-muted-foreground">{r.name ?? tickerInfo[r.symbol]}</div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={r.triggered ? "default" : "outline"}>

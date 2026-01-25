@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field
 
 
 # API DTOs (Pydantic): used for request/response validation at the API boundary.
-class OptionsResponse(BaseModel):
+class UniverseResponse(BaseModel):
     tickers: list[str]
+    watchlist: list[str]
     timeframes: list[str]
     tickerInfo: dict[str, str]
 

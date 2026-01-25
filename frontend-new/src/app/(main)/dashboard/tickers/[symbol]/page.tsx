@@ -5,24 +5,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TickerChart, type BarPoint } from "@/components/tickers/ticker-chart";
 import { getJson } from "@/lib/api";
+import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
 type Params = { symbol: string };
-
-type OptionsResponse = {
-  tickers: string[];
-  timeframes: string[];
-  tickerInfo: Record<string, string>;
-};
 
 type BarsResponse = {
   ticker: string;
   timeframe: string;
   bars: { time: string | null; t: number; c: number }[];
 };
-
-async function fetchOptions(): Promise<OptionsResponse> {
-  return getJson<OptionsResponse>("/api/options");
-}
 
 async function fetchBars(ticker: string, timeframe: string): Promise<BarsResponse> {
   const params = new URLSearchParams({ ticker, timeframe, limit: "200" });
@@ -37,13 +28,11 @@ function formatDateLabel(ts: number) {
 export default async function TickerDetailPage({ params }: { params: Promise<Params> }) {
   const { symbol: rawSymbol } = await params;
   const symbol = decodeURIComponent(rawSymbol || "").toUpperCase();
-  const options = await fetchOptions();
-  if (!symbol || !options.tickers.includes(symbol)) {
-    notFound();
-  }
-  const timeframe = options.timeframes[0] || "6M_1d";
+  const universe = await fetchUniverse();
+  const timeframe = universe.timeframes.includes("6M_1d") ? "6M_1d" : universe.timeframes[0] || "6M_1d";
   const barsRes = await fetchBars(symbol, timeframe);
-  const name = options.tickerInfo?.[symbol] ?? symbol;
+  const labelMap = universe.tickerInfo || {};
+  const name = labelMap[symbol] ?? symbol;
 
   const chartData: BarPoint[] =
     barsRes.bars?.map((b) => ({

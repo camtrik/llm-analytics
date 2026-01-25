@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getJson, API_BASE } from "@/lib/api";
+import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
 type ProviderInfo = {
   name: string;
@@ -22,12 +23,6 @@ type ProviderInfo = {
 type ProvidersResponse = {
   providers: ProviderInfo[];
   defaultProvider: string;
-};
-
-type OptionsResponse = {
-  tickers: string[];
-  timeframes: string[];
-  tickerInfo: Record<string, string>;
 };
 
 type ConversationEntry = { role: "assistant" | "user"; content: string };
@@ -61,7 +56,7 @@ type AnalysisRunResponse = {
 export default function AnalysisPage() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [defaultProvider, setDefaultProvider] = useState<string>("gpt");
-  const [options, setOptions] = useState<OptionsResponse | null>(null);
+  const [universe, setUniverse] = useState<UniverseResponse | null>(null);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>("gpt");
   const [promptLanguage, setPromptLanguage] = useState<"en" | "zh">("en");
@@ -80,13 +75,11 @@ export default function AnalysisPage() {
         setSelectedProvider(res.defaultProvider);
       })
       .catch((err) => setError(err.message));
-    getJson<OptionsResponse>("/api/options")
-      .then((res) => setOptions(res))
-      .catch((err) => setError(err.message));
+    fetchUniverse().then(setUniverse).catch((err) => setError(err.message));
   }, []);
 
-  const tickerInfo = options?.tickerInfo ?? {};
-  const sortedTickers = options?.tickers ?? [];
+  const tickerInfo = universe?.tickerInfo ?? {};
+  const sortedTickers = universe?.tickers ?? [];
 
   const runAnalysis = async () => {
     if (!selectedTickers.length) {

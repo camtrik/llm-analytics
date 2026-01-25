@@ -11,13 +11,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getJson, API_BASE } from "@/lib/api";
-
-type OptionsResponse = {
-  tickers: string[];
-  timeframes: string[];
-  tickerInfo: Record<string, string>;
-};
+import { API_BASE } from "@/lib/api";
+import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
 type BacktestResult = {
   symbol: string;
@@ -46,7 +41,7 @@ type BacktestResponse = {
 };
 
 export default function LowVolumeBacktestPage() {
-  const [options, setOptions] = useState<OptionsResponse | null>(null);
+  const [universe, setUniverse] = useState<UniverseResponse | null>(null);
   const [timeframe, setTimeframe] = useState("");
   const [asOfDate, setAsOfDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [horizonBars, setHorizonBars] = useState("5");
@@ -60,10 +55,12 @@ export default function LowVolumeBacktestPage() {
   const [data, setData] = useState<BacktestResponse | null>(null);
 
   useEffect(() => {
-    getJson<OptionsResponse>("/api/options")
+    fetchUniverse()
       .then((res) => {
-        setOptions(res);
-        setTimeframe(res.timeframes[0] || "6M_1d");
+        setUniverse(res);
+        const preferred = "6M_1d";
+        const fallback = res.timeframes?.[0] ?? "";
+        setTimeframe(res.timeframes?.includes(preferred) ? preferred : fallback);
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -99,7 +96,7 @@ export default function LowVolumeBacktestPage() {
     }
   };
 
-  const tickerInfo = options?.tickerInfo ?? {};
+  const tickerInfo = universe?.tickerInfo ?? {};
   const triggered = data?.results?.filter((r) => r.triggered) || [];
 
   return (
@@ -133,7 +130,7 @@ export default function LowVolumeBacktestPage() {
               onChange={(e) => setTimeframe(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              {(options?.timeframes || []).map((tf) => (
+              {(universe?.timeframes || []).map((tf) => (
                 <option key={tf} value={tf}>
                   {tf}
                 </option>
@@ -221,7 +218,7 @@ export default function LowVolumeBacktestPage() {
                       <TableRow key={`${r.symbol}-${idx}`}>
                         <TableCell>
                           <div className="font-medium">{r.symbol}</div>
-                          <div className="text-xs text-muted-foreground">{tickerInfo[r.symbol]}</div>
+                          <div className="text-xs text-muted-foreground">{r.name ?? tickerInfo[r.symbol]}</div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={r.triggered ? "default" : "outline"}>

@@ -5,9 +5,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { API_BASE } from "@/lib/api";
 
-type Props = { tickers: string[] };
+type Props = { tickers: string[]; label?: string };
 
-export function RefreshButton({ tickers }: Props) {
+export function RefreshButton({ tickers, label = "刷新缓存" }: Props) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -34,7 +34,7 @@ export function RefreshButton({ tickers }: Props) {
     <div className="flex items-center gap-2">
       <Button variant="outline" size="sm" onClick={refresh} disabled={loading || !tickers.length}>
         <RefreshCcw className="mr-2 h-4 w-4" />
-        {loading ? "刷新中..." : "刷新缓存"}
+        {loading ? "刷新中..." : label}
       </Button>
       {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
     </div>

@@ -8,17 +8,32 @@ from app.config.timeframes import TIMEFRAME_COMBOS
 
 
 def _load_tickers() -> dict[str, str]:
-    path = Path(__file__).with_name("tickers.yaml")
+    path = Path(__file__).with_name("watchlist.yaml")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     mapping: dict[str, str] = {}
-    for group in ("core", "optional"):
-        for item in data.get(group, []) or []:
-            symbol = str(item.get("symbol", "")).strip()
-            name = str(item.get("name", "")).strip()
-            if symbol:
-                mapping[symbol] = name or symbol
+    for item in data.get("tickers", []) or []:
+        symbol = str(item.get("symbol", "")).strip()
+        name = str(item.get("name", "")).strip()
+        if symbol:
+            mapping[symbol] = name or symbol
     return mapping
 
 
-TICKER_LABELS = _load_tickers()
-ALL_TICKERS = list(TICKER_LABELS.keys())
+def _load_nikkei225() -> dict[str, str]:
+    path = Path(__file__).with_name("nikkei225.yml")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    mapping: dict[str, str] = {}
+    for item in data.get("tickers", []) or []:
+        symbol = str(item.get("symbol", "")).strip()
+        name = str(item.get("name", "")).strip()
+        if symbol:
+            mapping[symbol] = name or symbol
+    return mapping
+
+
+WATCHLIST_LABELS = _load_tickers()
+NIKKEI_LABELS = _load_nikkei225()
+
+TICKER_LABELS = {**NIKKEI_LABELS, **WATCHLIST_LABELS}
+ALL_TICKERS = sorted(TICKER_LABELS.keys())
+WATCHLIST_TICKERS = sorted(WATCHLIST_LABELS.keys())

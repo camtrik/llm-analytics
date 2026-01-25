@@ -3,14 +3,20 @@ from __future__ import annotations
 from typing import Iterable
 
 from app.config.settings import load_settings
-from app.config.data_config import ALL_TICKERS, TIMEFRAME_COMBOS, TICKER_LABELS
+from app.config.data_config import (
+    ALL_TICKERS,
+    TIMEFRAME_COMBOS,
+    TICKER_LABELS,
+    WATCHLIST_LABELS,
+    WATCHLIST_TICKERS,
+)
 from app.errors import ApiError
 from app.config.timeframes import Timeframe
 from app.data.market_cache import MarketCache
 from app.data.models import (
     BarsBatchResponse,
     BarsResponse,
-    OptionsResponse,
+    UniverseResponse,
     RefreshFailure as RefreshFailureModel,
     RefreshResponse,
 )
@@ -24,12 +30,16 @@ class BarsRepository:
         tickers: list[str],
         timeframes: list[Timeframe],
         ticker_labels: dict[str, str],
+        watchlist_tickers: list[str],
+        watchlist_labels: dict[str, str],
     ) -> None:
         self._cache = cache
         self._max_limit = max_limit
         self._tickers = tickers
         self._timeframes = timeframes
         self._ticker_labels = ticker_labels
+        self._watchlist = watchlist_tickers
+        self._watchlist_labels = watchlist_labels
 
     def _validate_limit(self, limit: int | None) -> None:
         if limit is None:
@@ -49,12 +59,13 @@ class BarsRepository:
                 details={"limit": limit, "maxLimit": self._max_limit},
             )
 
-    def list_options(self) -> OptionsResponse:
+    def list_universe(self) -> UniverseResponse:
         tickers = sorted(self._tickers)
         timeframes = sorted([tf.name for tf in self._timeframes])
 
-        return OptionsResponse(
+        return UniverseResponse(
             tickers=tickers,
+            watchlist=self._watchlist,
             timeframes=timeframes,
             tickerInfo=dict(self._ticker_labels),
         )
@@ -123,7 +134,13 @@ class BarsRepository:
 _settings = load_settings()
 _cache = MarketCache(_settings.runtime_dir / "market_cache", TIMEFRAME_COMBOS)
 _repository = BarsRepository(
-    _cache, _settings.max_limit, ALL_TICKERS, TIMEFRAME_COMBOS, TICKER_LABELS
+    _cache,
+    _settings.max_limit,
+    ALL_TICKERS,
+    TIMEFRAME_COMBOS,
+    TICKER_LABELS,
+    WATCHLIST_TICKERS,
+    WATCHLIST_LABELS,
 )
 
 

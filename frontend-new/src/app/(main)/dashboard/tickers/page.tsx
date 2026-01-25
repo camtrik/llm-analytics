@@ -1,22 +1,12 @@
-import { ArrowUpRight, RefreshCcw } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getJson, API_BASE } from "@/lib/api";
+import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 import { RefreshButton } from "@/components/tickers/watchlist-refresh";
-
-type OptionsResponse = {
-  tickers: string[];
-  timeframes: string[];
-  tickerInfo: Record<string, string>;
-};
-
-async function fetchOptions(): Promise<OptionsResponse> {
-  return getJson<OptionsResponse>("/api/options");
-}
 
 function formatLabel(ticker: string, info: Record<string, string>) {
   const name = info[ticker];
@@ -29,7 +19,7 @@ export default function TickersPage() {
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Watchlist</h1>
         <p className="text-sm text-muted-foreground">
-          默认读取后端配置的 tickers.yaml，可点击跳转到详情页查看 K 线与信息。
+          默认读取后端配置的 watchlist.yaml，可点击跳转到详情页查看 K 线与信息。
         </p>
       </div>
       <Suspense fallback={<SkeletonSection />}>
@@ -40,17 +30,19 @@ export default function TickersPage() {
 }
 
 async function TickersSection() {
-  const options = await fetchOptions();
-  const tickers = options.tickers || [];
+  const universe = await fetchUniverse();
+  const tickers = universe.watchlist?.length ? universe.watchlist : universe.tickers || [];
+  const labelMap = universe.tickerInfo || {};
+  const defaultTf = "6M_1d";
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-4">
         <div>
           <CardTitle>关注列表</CardTitle>
-          <CardDescription>{tickers.length} 个标的</CardDescription>
+          <CardDescription>{tickers.length} 个标的 · 默认 timeframe：{defaultTf}</CardDescription>
         </div>
-        <RefreshButton tickers={tickers} />
+        <RefreshButton tickers={tickers} label="刷新缓存" />
       </CardHeader>
       <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {tickers.map((ticker) => (
@@ -62,10 +54,10 @@ async function TickersSection() {
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <div className="text-base font-medium leading-tight">
-                  {formatLabel(ticker, options.tickerInfo || {})}
+                  {formatLabel(ticker, labelMap)}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  默认 timeframe：{options.timeframes?.[0] ?? "—"}
+                  默认 timeframe：{universe.timeframes?.[0] ?? "—"}
                 </div>
               </div>
               <Badge variant="outline" className="gap-1">
