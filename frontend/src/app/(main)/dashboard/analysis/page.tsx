@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Send } from "lucide-react";
+
 import Link from "next/link";
 
+import { ArrowRight, Send } from "lucide-react";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { getJson, API_BASE } from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
+import { API_BASE, getJson } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
 type ProviderInfo = {
@@ -75,7 +77,9 @@ export default function AnalysisPage() {
         setSelectedProvider(res.defaultProvider);
       })
       .catch((err) => setError(err.message));
-    fetchUniverse().then(setUniverse).catch((err) => setError(err.message));
+    fetchUniverse()
+      .then(setUniverse)
+      .catch((err) => setError(err.message));
   }, []);
 
   const tickerInfo = universe?.tickerInfo ?? {};
@@ -198,9 +202,7 @@ export default function AnalysisPage() {
                         <span className="font-semibold">{a.action}</span>
                         <span className="text-muted-foreground">{a.timeframe}</span>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        置信度 {(a.confidence * 100).toFixed(0)}%
-                      </div>
+                      <div className="text-xs text-muted-foreground">置信度 {(a.confidence * 100).toFixed(0)}%</div>
                       <div className="w-full text-sm text-muted-foreground mt-1">{a.rationale}</div>
                     </div>
                   ))}
@@ -272,9 +274,7 @@ export default function AnalysisPage() {
                       variant={active ? "default" : "outline"}
                       className="cursor-pointer"
                       onClick={() =>
-                        setSelectedTickers((prev) =>
-                          active ? prev.filter((x) => x !== t) : [...prev, t],
-                        )
+                        setSelectedTickers((prev) => (active ? prev.filter((x) => x !== t) : [...prev, t]))
                       }
                     >
                       {t} {tickerInfo[t] ? `· ${tickerInfo[t]}` : ""}
@@ -299,13 +299,8 @@ export default function AnalysisPage() {
           <div className="max-h-[420px] space-y-3 overflow-y-auto rounded-md border bg-muted/30 p-3 text-sm">
             {conversation.length ? (
               conversation.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-md border bg-background px-3 py-2 shadow-sm"
-                >
-                  <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    {item.role}
-                  </div>
+                <div key={idx} className="rounded-md border bg-background px-3 py-2 shadow-sm">
+                  <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">{item.role}</div>
                   <div className="whitespace-pre-wrap leading-relaxed">{item.content}</div>
                 </div>
               ))

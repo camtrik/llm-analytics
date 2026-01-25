@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -14,16 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
-
-type BacktestParams = {
-  timeframe: string;
-  asOfDate: string; // YYYY-MM-DD
-  horizonBars: string;
-  entryExecution: "close" | "next_open";
-  volRatioMax: string;
-  minBodyPct: string;
-  onlyTriggered: "1" | "0";
-};
+import { parseBacktestSearchParams, preferredTimeframe, type BacktestParams } from "./params";
 
 type BacktestResult = {
   symbol: string;
@@ -51,40 +43,6 @@ type BacktestResponse = {
   results: BacktestResult[];
 };
 
-const preferredTimeframe = "6M_1d";
-const defaultAsOfDate = () => new Date().toISOString().slice(0, 10);
-
-const DEFAULT_PARAMS: BacktestParams = {
-  timeframe: "",
-  asOfDate: defaultAsOfDate(),
-  horizonBars: "5",
-  entryExecution: "close",
-  volRatioMax: "0.5",
-  minBodyPct: "0.002",
-  onlyTriggered: "1",
-};
-
-const normalizeParams = (params: BacktestParams): BacktestParams => ({
-  ...DEFAULT_PARAMS,
-  ...params,
-  horizonBars: Number.isNaN(parseInt(params.horizonBars, 10)) ? DEFAULT_PARAMS.horizonBars : params.horizonBars,
-  volRatioMax: Number.isNaN(parseFloat(params.volRatioMax)) ? DEFAULT_PARAMS.volRatioMax : params.volRatioMax,
-  minBodyPct: Number.isNaN(parseFloat(params.minBodyPct)) ? DEFAULT_PARAMS.minBodyPct : params.minBodyPct,
-  entryExecution: params.entryExecution === "next_open" ? "next_open" : "close",
-  onlyTriggered: params.onlyTriggered === "0" ? "0" : "1",
-});
-
-const parseSearchParams = (searchParams: URLSearchParams): BacktestParams =>
-  normalizeParams({
-    timeframe: searchParams.get("timeframe") || DEFAULT_PARAMS.timeframe,
-    asOfDate: searchParams.get("asOfDate") || DEFAULT_PARAMS.asOfDate,
-    horizonBars: searchParams.get("horizonBars") || DEFAULT_PARAMS.horizonBars,
-    entryExecution: (searchParams.get("entryExecution") as BacktestParams["entryExecution"]) || DEFAULT_PARAMS.entryExecution,
-    volRatioMax: searchParams.get("volRatioMax") || DEFAULT_PARAMS.volRatioMax,
-    minBodyPct: searchParams.get("minBodyPct") || DEFAULT_PARAMS.minBodyPct,
-    onlyTriggered: (searchParams.get("onlyTriggered") as BacktestParams["onlyTriggered"]) || DEFAULT_PARAMS.onlyTriggered,
-  });
-
 const buildSearchParams = (current: URLSearchParams, updates: Partial<BacktestParams>): URLSearchParams => {
   const next = new URLSearchParams(current.toString());
   Object.entries(updates).forEach(([key, value]) => {
@@ -100,20 +58,16 @@ export default function LowVolumeBacktestPage() {
   const pathname = usePathname();
   const [isTransitioning, startTransition] = useTransition();
 
-  const params = useMemo(() => parseSearchParams(searchParams), [searchParams]);
+  const params = useMemo(() => parseBacktestSearchParams(searchParams), [searchParams]);
 
   const [universe, setUniverse] = useState<UniverseResponse | null>(null);
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<BacktestResponse | null>(null);
 
   useEffect(() => {
     fetchUniverse()
       .then((res) => {
         setUniverse(res);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => console.error(err));
   }, []);
 
   // Ensure timeframe default is set once universe is known; URL is single source of truth
@@ -139,9 +93,12 @@ export default function LowVolumeBacktestPage() {
 
   const run = async () => {
     if (!params.timeframe) return;
-    setLoading(true);
-    setError(null);
-    try {
+    await backtestQuery.refetch();
+  };
+
+  const backtestQuery = useQuery({
+    queryKey: ["low-volume", "backtest", params],
+    queryFn: async (): Promise<BacktestResponse> => {
       const payload = {
         timeframe: params.timeframe,
         asOfDate: params.asOfDate,
@@ -160,14 +117,14 @@ export default function LowVolumeBacktestPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`回测失败 (${res.status})`);
-      const json = (await res.json()) as BacktestResponse;
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "请求失败");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return (await res.json()) as BacktestResponse;
+    },
+    enabled: false,
+  });
+
+  const errorMessage = backtestQuery.error instanceof Error ? backtestQuery.error.message : null;
+  const data = backtestQuery.data;
+  const isLoading = backtestQuery.isFetching || isTransitioning;
 
   const tickerInfo = universe?.tickerInfo ?? {};
   const triggered = data?.results?.filter((r) => r.triggered) || [];
@@ -185,9 +142,9 @@ export default function LowVolumeBacktestPage() {
         </Button>
       </div>
 
-      {error && (
+      {errorMessage && (
         <Alert className="border-destructive/50 bg-destructive/5 text-destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       )}
 
@@ -249,8 +206,8 @@ export default function LowVolumeBacktestPage() {
             </Badge>
           </div>
           <div className="md:col-span-2 lg:col-span-3">
-            <Button onClick={run} disabled={loading || isTransitioning}>
-              {loading ? "回测中..." : "运行回测"}
+            <Button onClick={run} disabled={isLoading}>
+              {isLoading ? "回测中..." : "运行回测"}
             </Button>
           </div>
         </CardContent>
@@ -261,14 +218,16 @@ export default function LowVolumeBacktestPage() {
           <CardHeader>
             <CardTitle className="text-base">结果</CardTitle>
             <CardDescription>
-              命中 {triggered.length}/{data.results.length} · asOf {new Date(data.asOfTs * 1000).toISOString().slice(0,10)}
+              命中 {triggered.length}/{data.results.length} · asOf{" "}
+              {new Date(data.asOfTs * 1000).toISOString().slice(0, 10)}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3 text-muted-foreground text-sm">
               {Object.entries(data.summary.winRateByDay || {}).map(([day, rate]) => (
                 <Badge key={day} variant="outline">
-                  Day {day}: {(rate * 100).toFixed(1)}% win · avg {(data.summary.avgReturnByDay[+day] * 100).toFixed(2)}%
+                  Day {day}: {(rate * 100).toFixed(1)}% win · avg {(data.summary.avgReturnByDay[+day] * 100).toFixed(2)}
+                  %
                 </Badge>
               ))}
             </div>
@@ -295,13 +254,9 @@ export default function LowVolumeBacktestPage() {
                           <div className="text-muted-foreground text-xs">{r.name ?? tickerInfo[r.symbol]}</div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={r.triggered ? "default" : "outline"}>
-                            {r.triggered ? "Yes" : "No"}
-                          </Badge>
+                          <Badge variant={r.triggered ? "default" : "outline"}>{r.triggered ? "Yes" : "No"}</Badge>
                         </TableCell>
-                        <TableCell>
-                          {r.signal ? `${r.signal.entryPrice.toFixed(2)}` : "-"}
-                        </TableCell>
+                        <TableCell>{r.signal ? `${r.signal.entryPrice.toFixed(2)}` : "-"}</TableCell>
                         <TableCell>{day1 !== null ? `${(day1 * 100).toFixed(2)}%` : "-"}</TableCell>
                         <TableCell>{dayN !== null ? `${(dayN * 100).toFixed(2)}%` : "-"}</TableCell>
                         <TableCell>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,16 +14,11 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
-
-type RangeParams = {
-  timeframe: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
-  horizonBars: string;
-  entryExecution: "close" | "next_open";
-  volRatioMax: string;
-  minBodyPct: string;
-};
+import {
+  parseRangeSearchParams,
+  type RangeParams,
+  preferredTimeframe,
+} from "./params";
 
 type RangeSummary = {
   sampleCountByDay: Record<number, number>;
@@ -37,40 +33,6 @@ type RangeResponse = {
   horizonBars: number;
   summary: RangeSummary;
 };
-
-const preferredTimeframe = "6M_1d";
-
-const defaultStartDate = () => new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-const defaultEndDate = () => new Date().toISOString().slice(0, 10);
-
-const DEFAULT_PARAMS: RangeParams = {
-  timeframe: "",
-  startDate: defaultStartDate(),
-  endDate: defaultEndDate(),
-  horizonBars: "5",
-  entryExecution: "close",
-  volRatioMax: "0.5",
-  minBodyPct: "0.002",
-};
-
-const normalizeParams = (params: RangeParams): RangeParams => ({
-  ...DEFAULT_PARAMS,
-  ...params,
-  horizonBars: Number.isNaN(parseInt(params.horizonBars, 10)) ? DEFAULT_PARAMS.horizonBars : params.horizonBars,
-  volRatioMax: Number.isNaN(parseFloat(params.volRatioMax)) ? DEFAULT_PARAMS.volRatioMax : params.volRatioMax,
-  minBodyPct: Number.isNaN(parseFloat(params.minBodyPct)) ? DEFAULT_PARAMS.minBodyPct : params.minBodyPct,
-});
-
-const parseSearchParams = (searchParams: URLSearchParams): RangeParams =>
-  normalizeParams({
-    timeframe: searchParams.get("timeframe") || DEFAULT_PARAMS.timeframe,
-    startDate: searchParams.get("startDate") || DEFAULT_PARAMS.startDate,
-    endDate: searchParams.get("endDate") || DEFAULT_PARAMS.endDate,
-    horizonBars: searchParams.get("horizonBars") || DEFAULT_PARAMS.horizonBars,
-    entryExecution: (searchParams.get("entryExecution") as RangeParams["entryExecution"]) || DEFAULT_PARAMS.entryExecution,
-    volRatioMax: searchParams.get("volRatioMax") || DEFAULT_PARAMS.volRatioMax,
-    minBodyPct: searchParams.get("minBodyPct") || DEFAULT_PARAMS.minBodyPct,
-  });
 
 const buildSearchParams = (current: URLSearchParams, updates: Partial<RangeParams>): URLSearchParams => {
   const next = new URLSearchParams(current.toString());
@@ -87,19 +49,15 @@ export default function LowVolumeRangePage() {
   const pathname = usePathname();
   const [isTransitioning, startTransition] = useTransition();
 
-  const params = useMemo(() => parseSearchParams(searchParams), [searchParams]);
+  const params = useMemo(() => parseRangeSearchParams(searchParams), [searchParams]);
   const [universe, setUniverse] = useState<UniverseResponse | null>(null);
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<RangeResponse | null>(null);
 
   useEffect(() => {
     fetchUniverse()
       .then((res) => {
         setUniverse(res);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => console.error(err));
   }, []);
 
   // Ensure timeframe has a default once universe is known (URL as single source of truth)
@@ -124,9 +82,13 @@ export default function LowVolumeRangePage() {
   );
 
   const run = async () => {
-    setLoading(true);
-    setError(null);
-    try {
+    if (!params.timeframe) return;
+    await rangeQuery.refetch();
+  };
+
+  const rangeQuery = useQuery({
+    queryKey: ["low-volume", "range", params],
+    queryFn: async (): Promise<RangeResponse> => {
       const payload = {
         timeframe: params.timeframe,
         startDate: params.startDate,
@@ -145,14 +107,14 @@ export default function LowVolumeRangePage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`区间统计失败 (${res.status})`);
-      const json = (await res.json()) as RangeResponse;
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "请求失败");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return (await res.json()) as RangeResponse;
+    },
+    enabled: false, // 手动触发，避免首屏自动请求
+  });
+
+  const errorMessage = rangeQuery.error instanceof Error ? rangeQuery.error.message : null;
+  const data = rangeQuery.data;
+  const isLoading = rangeQuery.isFetching || isTransitioning;
 
   return (
     <div className="space-y-6">
@@ -166,9 +128,9 @@ export default function LowVolumeRangePage() {
         </Button>
       </div>
 
-      {error && (
+      {errorMessage && (
         <Alert className="border-destructive/50 bg-destructive/5 text-destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       )}
 
@@ -224,8 +186,8 @@ export default function LowVolumeRangePage() {
             <Input value={params.minBodyPct} onChange={(e) => updateParams({ minBodyPct: e.target.value })} />
           </div>
           <div className="md:col-span-2 lg:col-span-3">
-            <Button onClick={run} disabled={loading || isTransitioning}>
-              {loading ? "统计中..." : "运行区间统计"}
+            <Button onClick={run} disabled={isLoading}>
+              {isLoading ? "统计中..." : "运行区间统计"}
             </Button>
           </div>
         </CardContent>
@@ -236,7 +198,8 @@ export default function LowVolumeRangePage() {
           <CardHeader>
             <CardTitle className="text-base">总结</CardTitle>
             <CardDescription>
-              Horizon {data.horizonBars} · {new Date(data.startTs * 1000).toISOString().slice(0,10)} → {new Date(data.endTs * 1000).toISOString().slice(0,10)}
+              Horizon {data.horizonBars} · {new Date(data.startTs * 1000).toISOString().slice(0, 10)} →{" "}
+              {new Date(data.endTs * 1000).toISOString().slice(0, 10)}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

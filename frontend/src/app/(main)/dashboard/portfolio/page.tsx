@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import { Upload } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -118,7 +119,7 @@ export default function PortfolioPage() {
           <CardTitle className="text-base">当前持仓</CardTitle>
           <CardDescription>
             {portfolio
-              ? `来源: ${portfolio.source} · 导入于 ${new Date(portfolio.importedAt).toISOString().slice(0,16).replace('T',' ')}`
+              ? `来源: ${portfolio.source} · 导入于 ${new Date(portfolio.importedAt).toISOString().slice(0, 16).replace("T", " ")}`
               : "尚未导入"}
           </CardDescription>
         </CardHeader>

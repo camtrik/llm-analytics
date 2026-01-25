@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { Metadata } from "next";
 
+import { QueryClientRoot } from "@/components/providers/query-client-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { APP_CONFIG } from "@/config/app-config";
 import { fontVars } from "@/lib/fonts/registry";
@@ -36,16 +37,18 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <ThemeBootScript />
       </head>
       <body className={`${fontVars} min-h-screen antialiased`}>
-        <PreferencesStoreProvider
-          themeMode={theme_mode}
-          themePreset={theme_preset}
-          contentLayout={content_layout}
-          navbarStyle={navbar_style}
-          font={font}
-        >
-          {children}
-          <Toaster />
-        </PreferencesStoreProvider>
+        <QueryClientRoot>
+          <PreferencesStoreProvider
+            themeMode={theme_mode}
+            themePreset={theme_preset}
+            contentLayout={content_layout}
+            navbarStyle={navbar_style}
+            font={font}
+          >
+            {children}
+            <Toaster />
+          </PreferencesStoreProvider>
+        </QueryClientRoot>
       </body>
     </html>
   );

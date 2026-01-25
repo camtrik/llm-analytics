@@ -6,7 +6,7 @@ import {
   Compass,
   LineChart,
   ListChecks,
-  LucideIcon,
+  type LucideIcon,
   Settings2,
   Waypoints,
 } from "lucide-react";

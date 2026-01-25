@@ -1,12 +1,14 @@
-import { ArrowUpRight } from "lucide-react";
-import Link from "next/link";
 import { Suspense } from "react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
+import Link from "next/link";
+
+import { ArrowUpRight } from "lucide-react";
+
 import { RefreshButton } from "@/components/tickers/watchlist-refresh";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
 function formatLabel(ticker: string, info: Record<string, string>) {
   const name = info[ticker];
@@ -40,7 +42,9 @@ async function TickersSection() {
       <CardHeader className="flex flex-row items-center justify-between gap-4">
         <div>
           <CardTitle>关注列表</CardTitle>
-          <CardDescription>{tickers.length} 个标的 · 默认 timeframe：{defaultTf}</CardDescription>
+          <CardDescription>
+            {tickers.length} 个标的 · 默认 timeframe：{defaultTf}
+          </CardDescription>
         </div>
         <RefreshButton tickers={tickers} label="刷新缓存" />
       </CardHeader>
@@ -53,12 +57,8 @@ async function TickersSection() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
-                <div className="text-base font-medium leading-tight">
-                  {formatLabel(ticker, labelMap)}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  默认 timeframe：{universe.timeframes?.[0] ?? "—"}
-                </div>
+                <div className="text-base font-medium leading-tight">{formatLabel(ticker, labelMap)}</div>
+                <div className="text-xs text-muted-foreground">默认 timeframe：{universe.timeframes?.[0] ?? "—"}</div>
               </div>
               <Badge variant="outline" className="gap-1">
                 查看
@@ -82,10 +82,7 @@ function SkeletonSection() {
       </CardHeader>
       <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }).map((_, idx) => (
-          <div
-            key={idx}
-            className="h-20 animate-pulse rounded-lg border bg-muted/40"
-          />
+          <div key={idx} className="h-20 animate-pulse rounded-lg border bg-muted/40" />
         ))}
       </CardContent>
     </Card>

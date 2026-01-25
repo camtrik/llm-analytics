@@ -1,9 +1,10 @@
-import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { notFound } from "next/navigation";
+
+import { type BarPoint, TickerChart } from "@/components/tickers/ticker-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TickerChart, type BarPoint } from "@/components/tickers/ticker-chart";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getJson } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
@@ -85,15 +86,11 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
           <CardContent className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">最新收盘</span>
-              <span className="font-medium">
-                {latest ? latest.c.toFixed(2) : "—"}
-              </span>
+              <span className="font-medium">{latest ? latest.c.toFixed(2) : "—"}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">最新日期</span>
-              <span className="font-medium">
-                {latest ? formatDateLabel(latest.t) : "—"}
-              </span>
+              <span className="font-medium">{latest ? formatDateLabel(latest.t) : "—"}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">数据条数</span>

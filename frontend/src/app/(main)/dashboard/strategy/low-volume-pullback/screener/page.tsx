@@ -1,27 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight } from "lucide-react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
-
-type ScreenerParams = {
-  timeframe: string;
-  volRatioMax: string;
-  minBodyPct: string;
-  recentBars: string;
-  onlyTriggered: "1" | "0";
-};
+import { parseScreenerSearchParams, preferredTimeframe, type ScreenerParams } from "./params";
 
 type LowVolumeResult = {
   symbol: string;
@@ -38,34 +32,6 @@ type LowVolumeResponse = {
   results: LowVolumeResult[];
 };
 
-const preferredTimeframe = "6M_1d";
-
-const DEFAULT_PARAMS: ScreenerParams = {
-  timeframe: "",
-  volRatioMax: "0.5",
-  minBodyPct: "0.002",
-  recentBars: "3",
-  onlyTriggered: "1",
-};
-
-const normalizeParams = (params: ScreenerParams): ScreenerParams => ({
-  ...DEFAULT_PARAMS,
-  ...params,
-  volRatioMax: Number.isNaN(parseFloat(params.volRatioMax)) ? DEFAULT_PARAMS.volRatioMax : params.volRatioMax,
-  minBodyPct: Number.isNaN(parseFloat(params.minBodyPct)) ? DEFAULT_PARAMS.minBodyPct : params.minBodyPct,
-  recentBars: Number.isNaN(parseInt(params.recentBars, 10)) ? DEFAULT_PARAMS.recentBars : params.recentBars,
-  onlyTriggered: params.onlyTriggered === "0" ? "0" : "1",
-});
-
-const parseSearchParams = (searchParams: URLSearchParams): ScreenerParams =>
-  normalizeParams({
-    timeframe: searchParams.get("timeframe") || DEFAULT_PARAMS.timeframe,
-    volRatioMax: searchParams.get("volRatioMax") || DEFAULT_PARAMS.volRatioMax,
-    minBodyPct: searchParams.get("minBodyPct") || DEFAULT_PARAMS.minBodyPct,
-    recentBars: searchParams.get("recentBars") || DEFAULT_PARAMS.recentBars,
-    onlyTriggered: (searchParams.get("onlyTriggered") as ScreenerParams["onlyTriggered"]) || DEFAULT_PARAMS.onlyTriggered,
-  });
-
 const buildSearchParams = (current: URLSearchParams, updates: Partial<ScreenerParams>): URLSearchParams => {
   const next = new URLSearchParams(current.toString());
   Object.entries(updates).forEach(([key, value]) => {
@@ -81,19 +47,16 @@ export default function LowVolumeScreenerPage() {
   const pathname = usePathname();
   const [isTransitioning, startTransition] = useTransition();
 
-  const params = useMemo(() => parseSearchParams(searchParams), [searchParams]);
+  const params = useMemo(() => parseScreenerSearchParams(searchParams), [searchParams]);
 
   const [universe, setUniverse] = useState<UniverseResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<LowVolumeResult[]>([]);
 
   useEffect(() => {
     fetchUniverse()
       .then((res) => {
         setUniverse(res);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => console.error(err));
   }, []);
 
   // Ensure timeframe default once universe is known; URL is the single source of truth
@@ -119,9 +82,12 @@ export default function LowVolumeScreenerPage() {
 
   const run = async () => {
     if (!params.timeframe) return;
-    setLoading(true);
-    setError(null);
-    try {
+    await screenerQuery.refetch();
+  };
+
+  const screenerQuery = useQuery({
+    queryKey: ["low-volume", "screener", params],
+    queryFn: async (): Promise<LowVolumeResponse> => {
       const payload = {
         timeframe: params.timeframe,
         tickers: null,
@@ -138,19 +104,18 @@ export default function LowVolumeScreenerPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`筛选失败 (${res.status})`);
-      const data = (await res.json()) as LowVolumeResponse;
-      setResults(data.results || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "请求失败");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return (await res.json()) as LowVolumeResponse;
+    },
+    enabled: false,
+  });
 
   const tickerInfo = universe?.tickerInfo ?? {};
 
+  const results = screenerQuery.data?.results ?? [];
   const triggered = useMemo(() => results.filter((r) => r.triggered), [results]);
   const onlyTriggeredValue = params.onlyTriggered === "1";
+  const errorMessage = screenerQuery.error instanceof Error ? screenerQuery.error.message : null;
+  const isLoading = screenerQuery.isFetching || isTransitioning;
 
   return (
     <div className="space-y-6">
@@ -164,9 +129,9 @@ export default function LowVolumeScreenerPage() {
         </Button>
       </div>
 
-      {error && (
+      {errorMessage && (
         <Alert className="border-destructive/50 bg-destructive/5 text-destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       )}
 
@@ -213,8 +178,8 @@ export default function LowVolumeScreenerPage() {
             </Badge>
           </div>
           <div className="md:col-span-2 lg:col-span-3">
-            <Button onClick={run} disabled={loading || isTransitioning}>
-              {loading ? "筛选中..." : "运行筛选"}
+            <Button onClick={run} disabled={isLoading}>
+              {isLoading ? "筛选中..." : "运行筛选"}
             </Button>
           </div>
         </CardContent>
@@ -223,7 +188,9 @@ export default function LowVolumeScreenerPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">结果</CardTitle>
-          <CardDescription>共 {results.length} 条 · 命中 {triggered.length}</CardDescription>
+          <CardDescription>
+            共 {results.length} 条 · 命中 {triggered.length}
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-auto">
           <Table>
@@ -245,9 +212,7 @@ export default function LowVolumeScreenerPage() {
                     <div className="text-muted-foreground text-xs">{r.name ?? tickerInfo[r.symbol]}</div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={r.triggered ? "default" : "outline"}>
-                      {r.triggered ? "Yes" : "No"}
-                    </Badge>
+                    <Badge variant={r.triggered ? "default" : "outline"}>{r.triggered ? "Yes" : "No"}</Badge>
                   </TableCell>
                   <TableCell>{r.volRatio !== null ? r.volRatio?.toFixed(3) : "-"}</TableCell>
                   <TableCell>{r.bodyPct != null ? `${(r.bodyPct * 100).toFixed(2)}%` : "-"}</TableCell>
