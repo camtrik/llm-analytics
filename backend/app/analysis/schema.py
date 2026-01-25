@@ -116,6 +116,7 @@ class AnalysisRunResponse(BaseModel):
     feed: FeedResponse | None = None
     constraints: AnalysisConstraints | None = None
     turns: list[AnalysisTurn] | None = None
+    promptLanguage: PromptLanguage = "en"
 
 
 class AnalysisContinueRequest(BaseModel):
@@ -129,6 +130,7 @@ class AnalysisContinueResponse(BaseModel):
     raw: str | None = None
     messages: list[ChatMessage] | None = None
     turns: list[AnalysisTurn] | None = None
+    promptLanguage: PromptLanguage = "en"
 
 
 class ProviderInfo(BaseModel):
@@ -165,6 +167,7 @@ class AnalysisRecord(BaseModel):
     provider: ProviderName
     model: str
     promptVersion: str
+    promptLanguage: PromptLanguage = "en"
     feed: FeedResponse
     constraints: AnalysisConstraints | None = None
     result: AnalysisResult | None = None

@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 
 import { type BarPoint, TickerChart } from "@/components/tickers/ticker-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
+import { addLocaleToPath } from "@/i18n/locale-path";
 import { getJson } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 
@@ -21,14 +24,11 @@ async function fetchBars(ticker: string, timeframe: string): Promise<BarsRespons
   return getJson<BarsResponse>(`/api/bars?${params.toString()}`);
 }
 
-function formatDateLabel(ts: number) {
-  const d = new Date(ts * 1000);
-  return d.toISOString().slice(0, 10);
-}
-
 export default async function TickerDetailPage({ params }: { params: Promise<Params> }) {
   const { symbol: rawSymbol } = await params;
   const symbol = decodeURIComponent(rawSymbol || "").toUpperCase();
+  const cookieStore = await cookies();
+  const locale = cookieStore.get("NEXT_LOCALE")?.value || "en";
   const universe = await fetchUniverse();
   const timeframe = universe.timeframes.includes("6M_1d") ? "6M_1d" : universe.timeframes[0] || "6M_1d";
   const barsRes = await fetchBars(symbol, timeframe);
@@ -37,7 +37,7 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
 
   const chartData: BarPoint[] =
     barsRes.bars?.map((b) => ({
-      time: b.time ?? formatDateLabel(b.t),
+      time: b.time ?? formatDate(b.t, locale),
       c: b.c,
     })) ?? [];
 
@@ -47,21 +47,21 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {symbol} · timeframe: {barsRes.timeframe}
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">{name}</h1>
+            <p className="text-sm text-muted-foreground">
+              {symbol} · timeframe: {barsRes.timeframe}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link href="/dashboard/tickers">返回列表</Link>
+            <Link href={addLocaleToPath(locale, "/dashboard/tickers")}>返回列表</Link>
           </Button>
           {change !== null && (
             <Badge variant={change >= 0 ? "default" : "destructive"}>
               {change >= 0 ? "+" : ""}
-              {change.toFixed(2)}%
+              {formatPercent(change / 100, locale)}
             </Badge>
           )}
         </div>
@@ -86,11 +86,11 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
           <CardContent className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">最新收盘</span>
-              <span className="font-medium">{latest ? latest.c.toFixed(2) : "—"}</span>
+              <span className="font-medium">{formatNumber(latest?.c, locale, { minimumFractionDigits: 2 })}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">最新日期</span>
-              <span className="font-medium">{latest ? formatDateLabel(latest.t) : "—"}</span>
+              <span className="font-medium">{formatDate(latest?.t, locale)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">数据条数</span>

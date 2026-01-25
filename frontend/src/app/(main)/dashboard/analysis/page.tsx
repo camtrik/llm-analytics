@@ -53,6 +53,7 @@ type AnalysisResult = {
 type AnalysisRunResponse = {
   id: number;
   result: AnalysisResult;
+  promptLanguage?: "en" | "zh";
 };
 
 export default function AnalysisPage() {

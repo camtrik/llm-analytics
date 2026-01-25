@@ -4,6 +4,8 @@ import { ListChecks, Waypoints } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { addLocaleToPath } from "@/i18n/locale-path";
+import { getRequestLocale } from "@/i18n/server-locale";
 
 const strategies = [
   {
@@ -14,7 +16,8 @@ const strategies = [
   },
 ];
 
-export default function StrategyHubPage() {
+export default async function StrategyHubPage() {
+  const locale = await getRequestLocale();
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -37,7 +40,7 @@ export default function StrategyHubPage() {
             </CardHeader>
             <CardContent className="mt-auto">
               <Button asChild variant="default">
-                <Link href={`/dashboard/strategy/${item.id}`}>进入</Link>
+                <Link href={addLocaleToPath(locale, `/dashboard/strategy/${item.id}`)}>进入</Link>
               </Button>
             </CardContent>
           </Card>

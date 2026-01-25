@@ -66,6 +66,7 @@ class AnalysisStore:
                     created_at TEXT NOT NULL,
                     provider TEXT NOT NULL,
                     model TEXT NOT NULL,
+                    prompt_language TEXT NOT NULL DEFAULT 'en',
                     prompt_version TEXT NOT NULL,
                     feed_json TEXT NOT NULL,
                     constraints_json TEXT,
@@ -87,12 +88,15 @@ class AnalysisStore:
                 conn.execute("ALTER TABLE analysis_runs ADD COLUMN messages_json TEXT;")
             if "turns_json" not in existing:
                 conn.execute("ALTER TABLE analysis_runs ADD COLUMN turns_json TEXT;")
+            if "prompt_language" not in existing:
+                conn.execute("ALTER TABLE analysis_runs ADD COLUMN prompt_language TEXT DEFAULT 'en';")
             conn.commit()
 
     def create_run(
         self,
         provider: ProviderName,
         model: str,
+        prompt_language: str,
         prompt_version: str,
         feed: FeedResponse,
         constraints: AnalysisConstraints | None,
@@ -108,14 +112,15 @@ class AnalysisStore:
             cursor = conn.execute(
                 """
                 INSERT INTO analysis_runs (
-                    created_at, provider, model, prompt_version, feed_json,
+                    created_at, provider, model, prompt_language, prompt_version, feed_json,
                     constraints_json, messages_json, turns_json, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     created_at,
                     provider,
                     model,
+                    prompt_language,
                     prompt_version,
                     feed_json,
                     constraints_json,
@@ -175,6 +180,7 @@ class AnalysisStore:
             row = conn.execute(
                 """
                 SELECT id, created_at, provider, model, prompt_version,
+                       prompt_language,
                        feed_json, constraints_json, result_json, raw_text,
                        messages_json, turns_json,
                        status, error
@@ -197,6 +203,7 @@ class AnalysisStore:
             provider=row["provider"],
             model=row["model"],
             promptVersion=row["prompt_version"],
+            promptLanguage=row["prompt_language"] or "en",
             feed=feed,
             constraints=constraints,
             result=result,

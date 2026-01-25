@@ -1,0 +1,32 @@
+{
+  "nav": {
+    "group": {
+      "data": "Data",
+      "strategies": "Strategies",
+      "llm": "LLM"
+    },
+    "tickers": "Tickers",
+    "portfolio": "Portfolio",
+    "strategyHub": "Strategy Hub",
+    "lowVolume": "Low-Volume Pullback",
+    "analysis": "Analysis",
+    "quant": "Quant",
+    "settings": "Settings",
+    "quickCreate": "Quick Create",
+    "inbox": "Inbox"
+  },
+  "ticker": {
+    "watchlistTitle": "Watchlist",
+    "watchlistDesc": "Loads tickers from watchlist.yaml; click to view details.",
+    "defaultTimeframe": "Default timeframe",
+    "view": "View",
+    "loading": "Loading...",
+    "none": "No tickers configured",
+    "latestClose": "Latest Close",
+    "latestDate": "Latest Date",
+    "count": "Bars Count",
+    "backToList": "Back to list",
+    "priceTrend": "Close Price Trend",
+    "fromCache": "From cached data"
+  }
+}

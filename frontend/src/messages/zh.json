@@ -1,0 +1,32 @@
+{
+  "nav": {
+    "group": {
+      "data": "数据",
+      "strategies": "策略",
+      "llm": "LLM"
+    },
+    "tickers": "标的",
+    "portfolio": "持仓",
+    "strategyHub": "策略入口",
+    "lowVolume": "缩量回调",
+    "analysis": "分析",
+    "quant": "量化",
+    "settings": "设置",
+    "quickCreate": "快速创建",
+    "inbox": "收件箱"
+  },
+  "ticker": {
+    "watchlistTitle": "关注列表",
+    "watchlistDesc": "默认读取 watchlist.yaml；点击查看详情。",
+    "defaultTimeframe": "默认周期",
+    "view": "查看",
+    "loading": "加载中...",
+    "none": "暂无配置的 ticker",
+    "latestClose": "最新收盘",
+    "latestDate": "最新日期",
+    "count": "数据条数",
+    "backToList": "返回列表",
+    "priceTrend": "收盘价走势",
+    "fromCache": "来自缓存数据"
+  }
+}

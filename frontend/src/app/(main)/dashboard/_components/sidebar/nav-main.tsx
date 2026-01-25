@@ -25,6 +25,8 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useI18n } from "@/components/providers/i18n-provider";
+import { addLocaleToPath, stripLocaleFromPath } from "@/i18n/locale-path";
 import type { NavGroup, NavMainItem } from "@/navigation/sidebar/sidebar-items";
 
 interface NavMainProps {
@@ -44,6 +46,8 @@ const NavItemExpanded = ({
   isActive: (url: string, subItems?: NavMainItem["subItems"]) => boolean;
   isSubmenuOpen: (subItems?: NavMainItem["subItems"]) => boolean;
 }) => {
+  const { t, locale } = useI18n();
+  const hrefWithLocale = (url: string) => addLocaleToPath(locale, url);
   return (
     <Collapsible key={item.title} asChild defaultOpen={isSubmenuOpen(item.subItems)} className="group/collapsible">
       <SidebarMenuItem>
@@ -55,7 +59,7 @@ const NavItemExpanded = ({
               tooltip={item.title}
             >
               {item.icon && <item.icon />}
-              <span>{item.title}</span>
+              <span>{t(item.titleKey ?? item.title, item.title)}</span>
               {item.comingSoon && <IsComingSoon />}
               <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
             </SidebarMenuButton>
@@ -66,9 +70,9 @@ const NavItemExpanded = ({
               isActive={isActive(item.url)}
               tooltip={item.title}
             >
-              <Link prefetch={false} href={item.url} target={item.newTab ? "_blank" : undefined}>
+              <Link prefetch={false} href={hrefWithLocale(item.url)} target={item.newTab ? "_blank" : undefined}>
                 {item.icon && <item.icon />}
-                <span>{item.title}</span>
+                <span>{t(item.titleKey ?? item.title, item.title)}</span>
                 {item.comingSoon && <IsComingSoon />}
               </Link>
             </SidebarMenuButton>
@@ -80,9 +84,13 @@ const NavItemExpanded = ({
               {item.subItems.map((subItem) => (
                 <SidebarMenuSubItem key={subItem.title}>
                   <SidebarMenuSubButton aria-disabled={subItem.comingSoon} isActive={isActive(subItem.url)} asChild>
-                    <Link prefetch={false} href={subItem.url} target={subItem.newTab ? "_blank" : undefined}>
+                    <Link
+                      prefetch={false}
+                      href={hrefWithLocale(subItem.url)}
+                      target={subItem.newTab ? "_blank" : undefined}
+                    >
                       {subItem.icon && <subItem.icon />}
-                      <span>{subItem.title}</span>
+                      <span>{t(subItem.titleKey ?? subItem.title, subItem.title)}</span>
                       {subItem.comingSoon && <IsComingSoon />}
                     </Link>
                   </SidebarMenuSubButton>
@@ -103,6 +111,8 @@ const NavItemCollapsed = ({
   item: NavMainItem;
   isActive: (url: string, subItems?: NavMainItem["subItems"]) => boolean;
 }) => {
+  const { t, locale } = useI18n();
+  const hrefWithLocale = (url: string) => addLocaleToPath(locale, url);
   return (
     <SidebarMenuItem key={item.title}>
       <DropdownMenu>
@@ -113,7 +123,7 @@ const NavItemCollapsed = ({
             isActive={isActive(item.url, item.subItems)}
           >
             {item.icon && <item.icon />}
-            <span>{item.title}</span>
+            <span>{t(item.titleKey ?? item.title, item.title)}</span>
             <ChevronRight />
           </SidebarMenuButton>
         </DropdownMenuTrigger>
@@ -127,9 +137,13 @@ const NavItemCollapsed = ({
                 aria-disabled={subItem.comingSoon}
                 isActive={isActive(subItem.url)}
               >
-                <Link prefetch={false} href={subItem.url} target={subItem.newTab ? "_blank" : undefined}>
+                <Link
+                  prefetch={false}
+                  href={hrefWithLocale(subItem.url)}
+                  target={subItem.newTab ? "_blank" : undefined}
+                >
                   {subItem.icon && <subItem.icon className="[&>svg]:text-sidebar-foreground" />}
-                  <span>{subItem.title}</span>
+                  <span>{t(subItem.titleKey ?? subItem.title, subItem.title)}</span>
                   {subItem.comingSoon && <IsComingSoon />}
                 </Link>
               </SidebarMenuSubButton>
@@ -143,18 +157,23 @@ const NavItemCollapsed = ({
 
 export function NavMain({ items }: NavMainProps) {
   const path = usePathname();
+  const normalizedPath = stripLocaleFromPath(path);
+  const { t, locale } = useI18n();
   const { state, isMobile } = useSidebar();
 
   const isItemActive = (url: string, subItems?: NavMainItem["subItems"]) => {
+    const target = stripLocaleFromPath(url);
     if (subItems?.length) {
-      return subItems.some((sub) => path.startsWith(sub.url));
+      return subItems.some((sub) => normalizedPath.startsWith(stripLocaleFromPath(sub.url)));
     }
-    return path === url;
+    return normalizedPath === target;
   };
 
   const isSubmenuOpen = (subItems?: NavMainItem["subItems"]) => {
-    return subItems?.some((sub) => path.startsWith(sub.url)) ?? false;
+    return subItems?.some((sub) => normalizedPath.startsWith(stripLocaleFromPath(sub.url))) ?? false;
   };
+
+  const hrefWithLocale = (url: string) => addLocaleToPath(locale, url);
 
   return (
     <>
@@ -167,7 +186,7 @@ export function NavMain({ items }: NavMainProps) {
                 className="min-w-8 bg-primary text-primary-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
               >
                 <PlusCircleIcon />
-                <span>Quick Create</span>
+                <span>{t("nav.quickCreate", "Quick Create")}</span>
               </SidebarMenuButton>
               <Button
                 size="icon"
@@ -175,7 +194,7 @@ export function NavMain({ items }: NavMainProps) {
                 variant="outline"
               >
                 <MailIcon />
-                <span className="sr-only">Inbox</span>
+                <span className="sr-only">{t("nav.inbox", "Inbox")}</span>
               </Button>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -183,7 +202,7 @@ export function NavMain({ items }: NavMainProps) {
       </SidebarGroup>
       {items.map((group) => (
         <SidebarGroup key={group.id}>
-          {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+          {group.label && <SidebarGroupLabel>{t(group.labelKey ?? group.label, group.label)}</SidebarGroupLabel>}
           <SidebarGroupContent className="flex flex-col gap-2">
             <SidebarMenu>
               {group.items.map((item) => {
@@ -192,20 +211,24 @@ export function NavMain({ items }: NavMainProps) {
                   if (!item.subItems) {
                     return (
                       <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton
-                          asChild
-                          aria-disabled={item.comingSoon}
-                          tooltip={item.title}
-                          isActive={isItemActive(item.url)}
+                      <SidebarMenuButton
+                        asChild
+                        aria-disabled={item.comingSoon}
+                        tooltip={item.title}
+                        isActive={isItemActive(item.url)}
+                      >
+                        <Link
+                          prefetch={false}
+                          href={hrefWithLocale(item.url)}
+                          target={item.newTab ? "_blank" : undefined}
                         >
-                          <Link prefetch={false} href={item.url} target={item.newTab ? "_blank" : undefined}>
-                            {item.icon && <item.icon />}
-                            <span>{item.title}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  }
+                          {item.icon && <item.icon />}
+                          <span>{t(item.titleKey ?? item.title, item.title)}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
                   // Otherwise, render the dropdown as before
                   return <NavItemCollapsed key={item.title} item={item} isActive={isItemActive} />;
                 }

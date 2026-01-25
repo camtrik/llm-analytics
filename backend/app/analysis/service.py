@@ -60,6 +60,7 @@ class AnalysisService:
         run_id = self._store.create_run(
             provider=payload.provider,
             model=model,
+            prompt_language=payload.promptLanguage,
             prompt_version=payload.promptVersion,
             feed=feed,
             constraints=constraints,
@@ -96,6 +97,7 @@ class AnalysisService:
                 feed=feed,
                 constraints=constraints,
                 turns=turns,
+                promptLanguage=payload.promptLanguage,
             )
         except ApiError as exc:
             self._store.fail_run(run_id, exc.message)
@@ -147,7 +149,7 @@ class AnalysisService:
                 model=record.model,
                 provider=record.provider,
                 prompt_version=record.promptVersion,
-                prompt_language="en",
+                prompt_language=getattr(record, "promptLanguage", "en"),
                 messages_override=messages,
             )
             new_turn = self._build_turn(
@@ -165,6 +167,7 @@ class AnalysisService:
                 raw=raw_text,
                 messages=messages_used,
                 turns=turns,
+                promptLanguage=getattr(record, "promptLanguage", "en"),
             )
         except ApiError as exc:
             self._store.fail_run(record.id, exc.message, messages=messages, turns=turns)

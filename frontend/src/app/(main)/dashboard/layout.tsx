@@ -9,9 +9,11 @@ import { users } from "@/data/users";
 import { SIDEBAR_COLLAPSIBLE_VALUES, SIDEBAR_VARIANT_VALUES } from "@/lib/preferences/layout";
 import { cn } from "@/lib/utils";
 import { getPreference } from "@/server/server-actions";
+import { getRequestLocale } from "@/i18n/server-locale";
 
 import { AccountSwitcher } from "./_components/sidebar/account-switcher";
 import { LayoutControls } from "./_components/sidebar/layout-controls";
+import { LanguageSwitcher } from "./_components/sidebar/language-switcher";
 import { SearchDialog } from "./_components/sidebar/search-dialog";
 import { ThemeSwitcher } from "./_components/sidebar/theme-switcher";
 
@@ -22,6 +24,7 @@ export default async function Layout({ children }: Readonly<{ children: ReactNod
     getPreference("sidebar_variant", SIDEBAR_VARIANT_VALUES, "inset"),
     getPreference("sidebar_collapsible", SIDEBAR_COLLAPSIBLE_VALUES, "icon"),
   ]);
+  const locale = await getRequestLocale();
 
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
@@ -48,6 +51,7 @@ export default async function Layout({ children }: Readonly<{ children: ReactNod
               <SearchDialog />
             </div>
             <div className="flex items-center gap-2">
+              <LanguageSwitcher locale={locale} />
               <LayoutControls />
               <ThemeSwitcher />
               <AccountSwitcher users={users} />
