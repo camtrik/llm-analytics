@@ -10,7 +10,6 @@ const DEFAULT_QUERY_OPTIONS: DefaultOptions["queries"] = {
   retry: 1,
   refetchOnWindowFocus: false,
   refetchOnReconnect: true,
-  keepPreviousData: true,
 };
 
 export function QueryClientRoot({ children }: { children: ReactNode }) {

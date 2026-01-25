@@ -8,7 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Params = { strategyId: string };
 
-const strategyMap = {
+const strategyMap: Record<
+  string,
+  { title: string; description: string; pages: { href: string; label: string }[] }
+> = {
   "low-volume-pullback": {
     title: "Low-Volume Pullback",
     description: "缩量回调阴线策略：筛选、单日回测、区间统计。",
@@ -18,7 +21,7 @@ const strategyMap = {
       { href: "/dashboard/strategy/low-volume-pullback/range", label: "区间统计" },
     ],
   },
-} satisfies Record<string, { title: string; description: string; pages: { href: string; label: string }[] }>;
+};
 
 export default async function StrategyEntryPage({ params }: { params: Promise<Params> }) {
   const { strategyId } = await params;
