@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,6 +14,16 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
+
+type BacktestParams = {
+  timeframe: string;
+  asOfDate: string; // YYYY-MM-DD
+  horizonBars: string;
+  entryExecution: "close" | "next_open";
+  volRatioMax: string;
+  minBodyPct: string;
+  onlyTriggered: "1" | "0";
+};
 
 type BacktestResult = {
   symbol: string;
@@ -40,15 +51,58 @@ type BacktestResponse = {
   results: BacktestResult[];
 };
 
+const preferredTimeframe = "6M_1d";
+const defaultAsOfDate = () => new Date().toISOString().slice(0, 10);
+
+const DEFAULT_PARAMS: BacktestParams = {
+  timeframe: "",
+  asOfDate: defaultAsOfDate(),
+  horizonBars: "5",
+  entryExecution: "close",
+  volRatioMax: "0.5",
+  minBodyPct: "0.002",
+  onlyTriggered: "1",
+};
+
+const normalizeParams = (params: BacktestParams): BacktestParams => ({
+  ...DEFAULT_PARAMS,
+  ...params,
+  horizonBars: Number.isNaN(parseInt(params.horizonBars, 10)) ? DEFAULT_PARAMS.horizonBars : params.horizonBars,
+  volRatioMax: Number.isNaN(parseFloat(params.volRatioMax)) ? DEFAULT_PARAMS.volRatioMax : params.volRatioMax,
+  minBodyPct: Number.isNaN(parseFloat(params.minBodyPct)) ? DEFAULT_PARAMS.minBodyPct : params.minBodyPct,
+  entryExecution: params.entryExecution === "next_open" ? "next_open" : "close",
+  onlyTriggered: params.onlyTriggered === "0" ? "0" : "1",
+});
+
+const parseSearchParams = (searchParams: URLSearchParams): BacktestParams =>
+  normalizeParams({
+    timeframe: searchParams.get("timeframe") || DEFAULT_PARAMS.timeframe,
+    asOfDate: searchParams.get("asOfDate") || DEFAULT_PARAMS.asOfDate,
+    horizonBars: searchParams.get("horizonBars") || DEFAULT_PARAMS.horizonBars,
+    entryExecution: (searchParams.get("entryExecution") as BacktestParams["entryExecution"]) || DEFAULT_PARAMS.entryExecution,
+    volRatioMax: searchParams.get("volRatioMax") || DEFAULT_PARAMS.volRatioMax,
+    minBodyPct: searchParams.get("minBodyPct") || DEFAULT_PARAMS.minBodyPct,
+    onlyTriggered: (searchParams.get("onlyTriggered") as BacktestParams["onlyTriggered"]) || DEFAULT_PARAMS.onlyTriggered,
+  });
+
+const buildSearchParams = (current: URLSearchParams, updates: Partial<BacktestParams>): URLSearchParams => {
+  const next = new URLSearchParams(current.toString());
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    next.set(key, value);
+  });
+  return next;
+};
+
 export default function LowVolumeBacktestPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isTransitioning, startTransition] = useTransition();
+
+  const params = useMemo(() => parseSearchParams(searchParams), [searchParams]);
+
   const [universe, setUniverse] = useState<UniverseResponse | null>(null);
-  const [timeframe, setTimeframe] = useState("");
-  const [asOfDate, setAsOfDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [horizonBars, setHorizonBars] = useState("5");
-  const [entryExecution, setEntryExecution] = useState<"close" | "next_open">("close");
-  const [volRatioMax, setVolRatioMax] = useState("0.5");
-  const [minBodyPct, setMinBodyPct] = useState("0.002");
-  const [onlyTriggered, setOnlyTriggered] = useState(true);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,27 +112,46 @@ export default function LowVolumeBacktestPage() {
     fetchUniverse()
       .then((res) => {
         setUniverse(res);
-        const preferred = "6M_1d";
-        const fallback = res.timeframes?.[0] ?? "";
-        setTimeframe(res.timeframes?.includes(preferred) ? preferred : fallback);
       })
       .catch((err) => setError(err.message));
   }, []);
 
+  // Ensure timeframe default is set once universe is known; URL is single source of truth
+  useEffect(() => {
+    if (!universe || params.timeframe) return;
+    const fallback = universe.timeframes?.[0] ?? "";
+    const nextTimeframe = universe.timeframes?.includes(preferredTimeframe) ? preferredTimeframe : fallback;
+    if (!nextTimeframe) return;
+
+    const next = buildSearchParams(searchParams, { timeframe: nextTimeframe });
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [universe, params.timeframe, router, pathname, searchParams]);
+
+  const updateParams = useCallback(
+    (updates: Partial<BacktestParams>) => {
+      startTransition(() => {
+        const next = buildSearchParams(searchParams, updates);
+        router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+      });
+    },
+    [router, pathname, searchParams],
+  );
+
   const run = async () => {
+    if (!params.timeframe) return;
     setLoading(true);
     setError(null);
     try {
       const payload = {
-        timeframe,
-        asOfDate,
+        timeframe: params.timeframe,
+        asOfDate: params.asOfDate,
         tickers: null,
-        onlyTriggered,
-        horizonBars: parseInt(horizonBars, 10),
-        entryExecution,
+        onlyTriggered: params.onlyTriggered === "1",
+        horizonBars: parseInt(params.horizonBars, 10),
+        entryExecution: params.entryExecution,
         params: {
-          volRatioMax: parseFloat(volRatioMax),
-          minBodyPct: parseFloat(minBodyPct),
+          volRatioMax: parseFloat(params.volRatioMax),
+          minBodyPct: parseFloat(params.minBodyPct),
         },
       };
       const res = await fetch(`${API_BASE}/api/strategy/low_volume_pullback/backtest`, {
@@ -98,13 +171,14 @@ export default function LowVolumeBacktestPage() {
 
   const tickerInfo = universe?.tickerInfo ?? {};
   const triggered = data?.results?.filter((r) => r.triggered) || [];
+  const onlyTriggeredValue = params.onlyTriggered === "1";
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Low-Volume Pullback · 单日回测</h1>
-          <p className="text-sm text-muted-foreground">asOf + horizon 预期收益/胜率</p>
+          <h1 className="font-semibold text-2xl">Low-Volume Pullback · 单日回测</h1>
+          <p className="text-muted-foreground text-sm">asOf + horizon 预期收益/胜率</p>
         </div>
         <Button asChild variant="outline" size="sm">
           <Link href="/dashboard/strategy">返回策略入口</Link>
@@ -126,8 +200,8 @@ export default function LowVolumeBacktestPage() {
           <div className="space-y-2">
             <Label>Timeframe</Label>
             <select
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
+              value={params.timeframe}
+              onChange={(e) => updateParams({ timeframe: e.target.value })}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
               {(universe?.timeframes || []).map((tf) => (
@@ -139,17 +213,17 @@ export default function LowVolumeBacktestPage() {
           </div>
           <div className="space-y-2">
             <Label>As Of Date</Label>
-            <Input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} />
+            <Input type="date" value={params.asOfDate} onChange={(e) => updateParams({ asOfDate: e.target.value })} />
           </div>
           <div className="space-y-2">
             <Label>Horizon Bars</Label>
-            <Input value={horizonBars} onChange={(e) => setHorizonBars(e.target.value)} />
+            <Input value={params.horizonBars} onChange={(e) => updateParams({ horizonBars: e.target.value })} />
           </div>
           <div className="space-y-2">
             <Label>Entry Execution</Label>
             <select
-              value={entryExecution}
-              onChange={(e) => setEntryExecution(e.target.value as "close" | "next_open")}
+              value={params.entryExecution}
+              onChange={(e) => updateParams({ entryExecution: e.target.value as BacktestParams["entryExecution"] })}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
               <option value="close">close</option>
@@ -158,24 +232,24 @@ export default function LowVolumeBacktestPage() {
           </div>
           <div className="space-y-2">
             <Label>volRatioMax</Label>
-            <Input value={volRatioMax} onChange={(e) => setVolRatioMax(e.target.value)} />
+            <Input value={params.volRatioMax} onChange={(e) => updateParams({ volRatioMax: e.target.value })} />
           </div>
           <div className="space-y-2">
             <Label>minBodyPct</Label>
-            <Input value={minBodyPct} onChange={(e) => setMinBodyPct(e.target.value)} />
+            <Input value={params.minBodyPct} onChange={(e) => updateParams({ minBodyPct: e.target.value })} />
           </div>
           <div className="space-y-2">
             <Label>仅显示命中</Label>
             <Badge
-              variant={onlyTriggered ? "default" : "outline"}
+              variant={onlyTriggeredValue ? "default" : "outline"}
               className="cursor-pointer"
-              onClick={() => setOnlyTriggered((v) => !v)}
+              onClick={() => updateParams({ onlyTriggered: onlyTriggeredValue ? "0" : "1" })}
             >
-              {onlyTriggered ? "只看命中" : "全部"}
+              {onlyTriggeredValue ? "只看命中" : "全部"}
             </Badge>
           </div>
           <div className="md:col-span-2 lg:col-span-3">
-            <Button onClick={run} disabled={loading}>
+            <Button onClick={run} disabled={loading || isTransitioning}>
               {loading ? "回测中..." : "运行回测"}
             </Button>
           </div>
@@ -191,7 +265,7 @@ export default function LowVolumeBacktestPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+            <div className="flex flex-wrap gap-3 text-muted-foreground text-sm">
               {Object.entries(data.summary.winRateByDay || {}).map(([day, rate]) => (
                 <Badge key={day} variant="outline">
                   Day {day}: {(rate * 100).toFixed(1)}% win · avg {(data.summary.avgReturnByDay[+day] * 100).toFixed(2)}%
@@ -207,7 +281,7 @@ export default function LowVolumeBacktestPage() {
                     <TableHead>Entry</TableHead>
                     <TableHead>Return D1</TableHead>
                     <TableHead>Return D{data.horizonBars}</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -218,7 +292,7 @@ export default function LowVolumeBacktestPage() {
                       <TableRow key={`${r.symbol}-${idx}`}>
                         <TableCell>
                           <div className="font-medium">{r.symbol}</div>
-                          <div className="text-xs text-muted-foreground">{r.name ?? tickerInfo[r.symbol]}</div>
+                          <div className="text-muted-foreground text-xs">{r.name ?? tickerInfo[r.symbol]}</div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={r.triggered ? "default" : "outline"}>
@@ -228,11 +302,11 @@ export default function LowVolumeBacktestPage() {
                         <TableCell>
                           {r.signal ? `${r.signal.entryPrice.toFixed(2)}` : "-"}
                         </TableCell>
-                        <TableCell>{day1 !== null ? (day1 * 100).toFixed(2) + "%" : "-"}</TableCell>
-                        <TableCell>{dayN !== null ? (dayN * 100).toFixed(2) + "%" : "-"}</TableCell>
+                        <TableCell>{day1 !== null ? `${(day1 * 100).toFixed(2)}%` : "-"}</TableCell>
+                        <TableCell>{dayN !== null ? `${(dayN * 100).toFixed(2)}%` : "-"}</TableCell>
                         <TableCell>
                           <Link
-                            className="inline-flex items-center text-sm text-primary hover:underline"
+                            className="inline-flex items-center text-primary text-sm hover:underline"
                             href={`/dashboard/tickers/${encodeURIComponent(r.symbol)}`}
                           >
                             详情 <ArrowRight className="ml-1 h-3 w-3" />
