@@ -1,4 +1,4 @@
-core:
+tickers:
   - symbol: "1621.T"
     name: "TOPIX-17 医药品 ETF"
   - symbol: "2243.T"
@@ -23,7 +23,6 @@ core:
     name: "三菱重工業"
   - symbol: "7013.T"
     name: "IHI"
-optional:
   - symbol: "6758.T"
     name: "ソニーグループ"
   - symbol: "7974.T"
