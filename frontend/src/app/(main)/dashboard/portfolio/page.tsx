@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE, getJson } from "@/lib/api";
+import { useI18n } from "@/components/providers/i18n-provider";
 
 type Position = {
   ticker: string;
@@ -33,6 +34,7 @@ type ImportResult = {
 };
 
 export default function PortfolioPage() {
+  const { t } = useI18n();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,7 +55,7 @@ export default function PortfolioPage() {
 
   const onUpload = async () => {
     if (!file) {
-      setError("请选择 CSV 文件");
+      setError(t("portfolio.needFile", "Please choose a CSV file"));
       return;
     }
     setLoading(true);
@@ -66,12 +68,16 @@ export default function PortfolioPage() {
         method: "POST",
         body: form,
       });
-      if (!res.ok) throw new Error(`导入失败 (${res.status})`);
+      if (!res.ok) throw new Error(t("portfolio.importFail", "Import failed ({status})").replace("{status}", `${res.status}`));
       const data = (await res.json()) as ImportResult;
-      setInfo(`成功导入 ${data.positions.length} 条，跳过 ${data.skipped}`);
+      setInfo(
+        t("portfolio.importSuccess", "Imported {count} items, skipped {skipped}")
+          .replace("{count}", `${data.positions.length}`)
+          .replace("{skipped}", `${data.skipped}`),
+      );
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "导入失败");
+      setError(err instanceof Error ? err.message : t("portfolio.importFailUnknown", "Import failed"));
     } finally {
       setLoading(false);
     }
@@ -80,8 +86,8 @@ export default function PortfolioPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Portfolio</h1>
-        <p className="text-sm text-muted-foreground">上传 SBI CSV 并查看当前持仓。</p>
+        <h1 className="text-2xl font-semibold">{t("portfolio.title", "Portfolio")}</h1>
+        <p className="text-sm text-muted-foreground">{t("portfolio.subtitle", "Upload SBI CSV to view current positions.")}</p>
       </div>
 
       {error && (
@@ -97,8 +103,8 @@ export default function PortfolioPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">导入</CardTitle>
-          <CardDescription>选择 SBI 导出的 CSV 文件</CardDescription>
+          <CardTitle className="text-base">{t("portfolio.import", "Import")}</CardTitle>
+          <CardDescription>{t("portfolio.importDesc", "Select the CSV exported from SBI")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 md:flex-row md:items-center">
           <Input
@@ -109,18 +115,20 @@ export default function PortfolioPage() {
           />
           <Button onClick={onUpload} disabled={loading} variant="default">
             <Upload className="mr-2 h-4 w-4" />
-            {loading ? "导入中..." : "导入"}
+            {loading ? t("portfolio.importing", "Importing...") : t("portfolio.importBtn", "Import")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">当前持仓</CardTitle>
+          <CardTitle className="text-base">{t("portfolio.current", "Current Positions")}</CardTitle>
           <CardDescription>
             {portfolio
-              ? `来源: ${portfolio.source} · 导入于 ${new Date(portfolio.importedAt).toISOString().slice(0, 16).replace("T", " ")}`
-              : "尚未导入"}
+              ? t("portfolio.source", "Source: {source} · Imported at {time}")
+                  .replace("{source}", portfolio.source)
+                  .replace("{time}", new Date(portfolio.importedAt).toISOString().slice(0, 16).replace("T", " "))
+              : t("portfolio.notImported", "Not imported yet")}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-auto">
@@ -128,9 +136,9 @@ export default function PortfolioPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Ticker</TableHead>
-                <TableHead>数量</TableHead>
-                <TableHead>成本</TableHead>
-                <TableHead>币种</TableHead>
+                <TableHead>{t("portfolio.qty", "Qty")}</TableHead>
+                <TableHead>{t("portfolio.cost", "Cost")}</TableHead>
+                <TableHead>{t("portfolio.currency", "Currency")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -146,13 +154,13 @@ export default function PortfolioPage() {
                     <TableCell>{p.currency ?? "-"}</TableCell>
                   </TableRow>
                 ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
-                    尚无持仓
-                  </TableCell>
-                </TableRow>
-              )}
+            ) : (
+              <TableRow>
+                <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
+                  {t("portfolio.empty", "No positions")}
+                </TableCell>
+              </TableRow>
+            )}
             </TableBody>
           </Table>
         </CardContent>

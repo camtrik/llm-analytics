@@ -10,6 +10,8 @@ import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { addLocaleToPath } from "@/i18n/locale-path";
 import { getJson } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
+import enMessages from "@/messages/en.json";
+import zhMessages from "@/messages/zh.json";
 
 type Params = { symbol: string };
 
@@ -29,6 +31,10 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
   const symbol = decodeURIComponent(rawSymbol || "").toUpperCase();
   const cookieStore = await cookies();
   const locale = cookieStore.get("NEXT_LOCALE")?.value || "en";
+  const t = (key: string, fallback: string) => {
+    const messages = locale === "zh" ? (zhMessages as any) : (enMessages as any);
+    return key.split(".").reduce((acc: any, k) => (acc && acc[k] !== undefined ? acc[k] : undefined), messages) ?? fallback;
+  };
   const universe = await fetchUniverse();
   const timeframe = universe.timeframes.includes("6M_1d") ? "6M_1d" : universe.timeframes[0] || "6M_1d";
   const barsRes = await fetchBars(symbol, timeframe);
@@ -56,7 +62,7 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link href={addLocaleToPath(locale, "/dashboard/tickers")}>返回列表</Link>
+            <Link href={addLocaleToPath(locale, "/dashboard/tickers")}>{t("ticker.backToList", "Back to list")}</Link>
           </Button>
           {change !== null && (
             <Badge variant={change >= 0 ? "default" : "destructive"}>
@@ -70,8 +76,10 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">收盘价走势</CardTitle>
-            <CardDescription>最近 {chartData.length} 根</CardDescription>
+            <CardTitle className="text-base">{t("ticker.priceTrend", "Close Price Trend")}</CardTitle>
+            <CardDescription>
+              {t("ticker.latestCount", "Latest {count} bars")?.replace("{count}", `${chartData.length}`) ?? `Latest ${chartData.length} bars`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <TickerChart data={chartData} />
@@ -80,20 +88,20 @@ export default async function TickerDetailPage({ params }: { params: Promise<Par
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">概览</CardTitle>
-            <CardDescription>来自缓存数据</CardDescription>
+            <CardTitle className="text-base">{t("ticker.overview", "Overview")}</CardTitle>
+            <CardDescription>{t("ticker.fromCache", "From cached data")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">最新收盘</span>
+              <span className="text-muted-foreground">{t("ticker.latestClose", "Latest Close")}</span>
               <span className="font-medium">{formatNumber(latest?.c, locale, { minimumFractionDigits: 2 })}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">最新日期</span>
+              <span className="text-muted-foreground">{t("ticker.latestDate", "Latest Date")}</span>
               <span className="font-medium">{formatDate(latest?.t, locale)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">数据条数</span>
+              <span className="text-muted-foreground">{t("ticker.count", "Bars Count")}</span>
               <span className="font-medium">{barsRes.bars?.length ?? 0}</span>
             </div>
           </CardContent>

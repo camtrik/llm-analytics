@@ -65,7 +65,7 @@ async function TickersSection({ locale }: { locale: Locale }) {
             {tickers.length} · {t(locale, "ticker.defaultTimeframe", "Default timeframe")}：{defaultTf}
           </CardDescription>
         </div>
-        <RefreshButton tickers={tickers} label="刷新缓存" />
+        <RefreshButton tickers={tickers} label={t(locale, "ticker.refresh", "Refresh cache")} />
       </CardHeader>
       <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {tickers.map((ticker) => (
@@ -74,18 +74,20 @@ async function TickersSection({ locale }: { locale: Locale }) {
             href={addLocaleToPath(locale, `/dashboard/tickers/${encodeURIComponent(ticker)}`)}
             className="group rounded-lg border bg-card/50 p-4 transition hover:-translate-y-0.5 hover:border-primary hover:shadow-sm"
           >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="text-base font-medium leading-tight">{formatLabel(ticker, labelMap)}</div>
-                <div className="text-xs text-muted-foreground">默认 timeframe：{universe.timeframes?.[0] ?? "—"}</div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-base font-medium leading-tight">{formatLabel(ticker, labelMap)}</div>
+                <div className="text-xs text-muted-foreground">
+                  {t(locale, "ticker.defaultTimeframe", "Default timeframe")}：{universe.timeframes?.[0] ?? "—"}
+                </div>
               </div>
               <Badge variant="outline" className="gap-1">
-                查看
+                {t(locale, "ticker.view", "View")}
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Badge>
-              </div>
-            </Link>
-          ))}
+            </div>
+          </Link>
+        ))}
         {!tickers.length && (
           <div className="text-sm text-muted-foreground">{t(locale, "ticker.none", "No tickers configured")}</div>
         )}

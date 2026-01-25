@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE } from "@/lib/api";
+import { useI18n } from "@/components/providers/i18n-provider";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 import { parseBacktestSearchParams, preferredTimeframe, type BacktestParams } from "./params";
 
@@ -53,6 +54,7 @@ const buildSearchParams = (current: URLSearchParams, updates: Partial<BacktestPa
 };
 
 export default function LowVolumeBacktestPage() {
+  const { t } = useI18n();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -116,7 +118,7 @@ export default function LowVolumeBacktestPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`回测失败 (${res.status})`);
+      if (!res.ok) throw new Error(t("strategy.lvp.backtest.error", "Backtest failed ({status})").replace("{status}", `${res.status}`));
       return (await res.json()) as BacktestResponse;
     },
     enabled: false,
@@ -134,11 +136,11 @@ export default function LowVolumeBacktestPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="font-semibold text-2xl">Low-Volume Pullback · 单日回测</h1>
-          <p className="text-muted-foreground text-sm">asOf + horizon 预期收益/胜率</p>
+          <h1 className="font-semibold text-2xl">{t("strategy.lvp.backtest.title", "Low-Volume Pullback · Single-Day Backtest")}</h1>
+          <p className="text-muted-foreground text-sm">{t("strategy.lvp.backtest.desc", "asOf + horizon expected return / win rate")}</p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href="/dashboard/strategy">返回策略入口</Link>
+          <Link href="/dashboard/strategy">{t("strategy.lvp.backtest.back", "Back to strategies")}</Link>
         </Button>
       </div>
 
@@ -150,8 +152,8 @@ export default function LowVolumeBacktestPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">参数</CardTitle>
-          <CardDescription>选择 asOf / horizon / 执行价</CardDescription>
+          <CardTitle className="text-base">{t("strategy.lvp.backtest.paramsTitle", "Parameters")}</CardTitle>
+          <CardDescription>{t("strategy.lvp.backtest.paramsDesc", "Pick asOf / horizon / execution price")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
@@ -196,18 +198,18 @@ export default function LowVolumeBacktestPage() {
             <Input value={params.minBodyPct} onChange={(e) => updateParams({ minBodyPct: e.target.value })} />
           </div>
           <div className="space-y-2">
-            <Label>仅显示命中</Label>
+            <Label>{t("strategy.lvp.backtest.onlyHit", "Only hits")}</Label>
             <Badge
               variant={onlyTriggeredValue ? "default" : "outline"}
               className="cursor-pointer"
               onClick={() => updateParams({ onlyTriggered: onlyTriggeredValue ? "0" : "1" })}
             >
-              {onlyTriggeredValue ? "只看命中" : "全部"}
+              {onlyTriggeredValue ? t("strategy.lvp.backtest.onlyHitOn", "Only hits") : t("strategy.lvp.backtest.onlyHitOff", "All")}
             </Badge>
           </div>
           <div className="md:col-span-2 lg:col-span-3">
             <Button onClick={run} disabled={isLoading}>
-              {isLoading ? "回测中..." : "运行回测"}
+              {isLoading ? t("strategy.lvp.backtest.running", "Running backtest...") : t("strategy.lvp.backtest.run", "Run backtest")}
             </Button>
           </div>
         </CardContent>
@@ -216,10 +218,12 @@ export default function LowVolumeBacktestPage() {
       {data && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">结果</CardTitle>
+            <CardTitle className="text-base">{t("strategy.lvp.backtest.resultTitle", "Results")}</CardTitle>
             <CardDescription>
-              命中 {triggered.length}/{data.results.length} · asOf{" "}
-              {new Date(data.asOfTs * 1000).toISOString().slice(0, 10)}
+              {t("strategy.lvp.backtest.resultSummary", "Hits {hits}/{total} · asOf {asOf}")
+                .replace("{hits}", `${triggered.length}`)
+                .replace("{total}", `${data.results.length}`)
+                .replace("{asOf}", new Date(data.asOfTs * 1000).toISOString().slice(0, 10))}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -254,8 +258,8 @@ export default function LowVolumeBacktestPage() {
                           <div className="text-muted-foreground text-xs">{r.name ?? tickerInfo[r.symbol]}</div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={r.triggered ? "default" : "outline"}>{r.triggered ? "Yes" : "No"}</Badge>
-                        </TableCell>
+                        <Badge variant={r.triggered ? "default" : "outline"}>{r.triggered ? "Yes" : "No"}</Badge>
+                      </TableCell>
                         <TableCell>{r.signal ? `${r.signal.entryPrice.toFixed(2)}` : "-"}</TableCell>
                         <TableCell>{day1 !== null ? `${(day1 * 100).toFixed(2)}%` : "-"}</TableCell>
                         <TableCell>{dayN !== null ? `${(dayN * 100).toFixed(2)}%` : "-"}</TableCell>
@@ -264,7 +268,7 @@ export default function LowVolumeBacktestPage() {
                             className="inline-flex items-center text-primary text-sm hover:underline"
                             href={`/dashboard/tickers/${encodeURIComponent(r.symbol)}`}
                           >
-                            详情 <ArrowRight className="ml-1 h-3 w-3" />
+                            {t("strategy.lvp.backtest.detail", "Detail")} <ArrowRight className="ml-1 h-3 w-3" />
                           </Link>
                         </TableCell>
                       </TableRow>

@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useI18n } from "@/components/providers/i18n-provider";
 import { API_BASE } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
 import { parseScreenerSearchParams, preferredTimeframe, type ScreenerParams } from "./params";
@@ -42,6 +43,7 @@ const buildSearchParams = (current: URLSearchParams, updates: Partial<ScreenerPa
 };
 
 export default function LowVolumeScreenerPage() {
+  const { t } = useI18n();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -103,7 +105,7 @@ export default function LowVolumeScreenerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`筛选失败 (${res.status})`);
+      if (!res.ok) throw new Error(t("strategy.lvp.screener.error", "Screener failed ({status})").replace("{status}", `${res.status}`));
       return (await res.json()) as LowVolumeResponse;
     },
     enabled: false,
@@ -121,11 +123,11 @@ export default function LowVolumeScreenerPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="font-semibold text-2xl">Low-Volume Pullback · 筛选</h1>
-          <p className="text-muted-foreground text-sm">调用 /api/strategy/low_volume_pullback</p>
+          <h1 className="font-semibold text-2xl">{t("strategy.lvp.screener.title", "Low-Volume Pullback · Screener")}</h1>
+          <p className="text-muted-foreground text-sm">{t("strategy.lvp.screener.desc", "Calls /api/strategy/low_volume_pullback")}</p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href="/dashboard/strategy">返回策略入口</Link>
+          <Link href="/dashboard/strategy">{t("strategy.lvp.screener.back", "Back to strategies")}</Link>
         </Button>
       </div>
 
@@ -137,8 +139,8 @@ export default function LowVolumeScreenerPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">参数</CardTitle>
-          <CardDescription>最常用参数已暴露，其他保持默认</CardDescription>
+          <CardTitle className="text-base">{t("strategy.lvp.screener.paramsTitle", "Parameters")}</CardTitle>
+          <CardDescription>{t("strategy.lvp.screener.paramsDesc", "Common parameters exposed; others default")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
@@ -168,18 +170,18 @@ export default function LowVolumeScreenerPage() {
             <Input value={params.recentBars} onChange={(e) => updateParams({ recentBars: e.target.value })} />
           </div>
           <div className="space-y-2">
-            <Label>仅显示命中</Label>
+            <Label>{t("strategy.lvp.screener.onlyHit", "Only hits")}</Label>
             <Badge
               variant={onlyTriggeredValue ? "default" : "outline"}
               className="cursor-pointer"
               onClick={() => updateParams({ onlyTriggered: onlyTriggeredValue ? "0" : "1" })}
             >
-              {onlyTriggeredValue ? "只看命中" : "全部"}
+              {onlyTriggeredValue ? t("strategy.lvp.screener.onlyHitOn", "Only hits") : t("strategy.lvp.screener.onlyHitOff", "All")}
             </Badge>
           </div>
           <div className="md:col-span-2 lg:col-span-3">
             <Button onClick={run} disabled={isLoading}>
-              {isLoading ? "筛选中..." : "运行筛选"}
+              {isLoading ? t("strategy.lvp.screener.running", "Running screener...") : t("strategy.lvp.screener.run", "Run screener")}
             </Button>
           </div>
         </CardContent>
@@ -187,9 +189,11 @@ export default function LowVolumeScreenerPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">结果</CardTitle>
+          <CardTitle className="text-base">{t("strategy.lvp.screener.resultTitle", "Results")}</CardTitle>
           <CardDescription>
-            共 {results.length} 条 · 命中 {triggered.length}
+            {t("strategy.lvp.screener.summary", "Total {total} · Hits {hits}")
+              .replace("{total}", `${results.length}`)
+              .replace("{hits}", `${triggered.length}`)}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-auto">
@@ -222,7 +226,7 @@ export default function LowVolumeScreenerPage() {
                       className="inline-flex items-center text-primary text-sm hover:underline"
                       href={`/dashboard/tickers/${encodeURIComponent(r.symbol)}`}
                     >
-                      详情 <ArrowRight className="ml-1 h-3 w-3" />
+                      {t("strategy.lvp.screener.detail", "Detail")} <ArrowRight className="ml-1 h-3 w-3" />
                     </Link>
                   </TableCell>
                 </TableRow>
@@ -230,7 +234,7 @@ export default function LowVolumeScreenerPage() {
               {!results.length && (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground text-sm">
-                    尚未运行
+                    {t("strategy.lvp.screener.notRun", "Not run yet")}
                   </TableCell>
                 </TableRow>
               )}

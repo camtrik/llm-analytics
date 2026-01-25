@@ -13,7 +13,7 @@ type Props = {
 
 export function TickerChart({ data }: Props) {
   if (!data.length) {
-    return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">暂无数据</div>;
+    return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">No data</div>;
   }
   return (
     <div className="h-72">

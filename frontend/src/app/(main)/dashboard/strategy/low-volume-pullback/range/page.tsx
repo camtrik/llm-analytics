@@ -12,13 +12,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useI18n } from "@/components/providers/i18n-provider";
 import { API_BASE } from "@/lib/api";
 import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
-import {
-  parseRangeSearchParams,
-  type RangeParams,
-  preferredTimeframe,
-} from "./params";
+import { parseRangeSearchParams, type RangeParams, preferredTimeframe } from "./params";
 
 type RangeSummary = {
   sampleCountByDay: Record<number, number>;
@@ -44,6 +41,7 @@ const buildSearchParams = (current: URLSearchParams, updates: Partial<RangeParam
 };
 
 export default function LowVolumeRangePage() {
+  const { t } = useI18n();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -106,10 +104,10 @@ export default function LowVolumeRangePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`区间统计失败 (${res.status})`);
+      if (!res.ok) throw new Error(t("strategy.lvp.range.error", "Range stats failed ({status})").replace("{status}", `${res.status}`));
       return (await res.json()) as RangeResponse;
     },
-    enabled: false, // 手动触发，避免首屏自动请求
+    enabled: false,
   });
 
   const errorMessage = rangeQuery.error instanceof Error ? rangeQuery.error.message : null;
@@ -120,11 +118,13 @@ export default function LowVolumeRangePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="font-semibold text-2xl">Low-Volume Pullback · 区间统计</h1>
-          <p className="text-muted-foreground text-sm">区间内每日检测命中日的 forward 胜率分布</p>
+          <h1 className="font-semibold text-2xl">{t("strategy.lvp.range.title", "Low-Volume Pullback · Range Stats")}</h1>
+          <p className="text-muted-foreground text-sm">
+            {t("strategy.lvp.range.desc", "Forward win-rate distribution on hit days within range")}
+          </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href="/dashboard/strategy">返回策略入口</Link>
+          <Link href="/dashboard/strategy">{t("strategy.lvp.range.back", "Back to strategies")}</Link>
         </Button>
       </div>
 
@@ -136,8 +136,8 @@ export default function LowVolumeRangePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">参数</CardTitle>
-          <CardDescription>区间 + horizon + 执行价</CardDescription>
+          <CardTitle className="text-base">{t("strategy.lvp.range.paramsTitle", "Parameters")}</CardTitle>
+          <CardDescription>{t("strategy.lvp.range.paramsDesc", "Range + horizon + execution price")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
@@ -187,7 +187,7 @@ export default function LowVolumeRangePage() {
           </div>
           <div className="md:col-span-2 lg:col-span-3">
             <Button onClick={run} disabled={isLoading}>
-              {isLoading ? "统计中..." : "运行区间统计"}
+              {isLoading ? t("strategy.lvp.range.running", "Running stats...") : t("strategy.lvp.range.run", "Run range stats")}
             </Button>
           </div>
         </CardContent>
@@ -196,7 +196,7 @@ export default function LowVolumeRangePage() {
       {data && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">总结</CardTitle>
+            <CardTitle className="text-base">{t("strategy.lvp.range.summaryTitle", "Summary")}</CardTitle>
             <CardDescription>
               Horizon {data.horizonBars} · {new Date(data.startTs * 1000).toISOString().slice(0, 10)} →{" "}
               {new Date(data.endTs * 1000).toISOString().slice(0, 10)}
@@ -217,7 +217,7 @@ export default function LowVolumeRangePage() {
                     <TableHead>Day</TableHead>
                     <TableHead>Samples</TableHead>
                     <TableHead>Win Rate</TableHead>
-                    <TableHead>Bucket 分布</TableHead>
+                    <TableHead>{t("strategy.lvp.range.bucket", "Bucket Distribution")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
