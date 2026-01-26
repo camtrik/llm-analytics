@@ -13,13 +13,19 @@ from app.config.data_config import (
 from app.errors import ApiError
 from app.config.timeframes import Timeframe
 from app.data.market_cache import MarketCache
+from collections import deque
+
 from app.data.models import (
     BarsBatchResponse,
+    BarsIndicatorsResponse,
     BarsResponse,
+    ChartBarPayload,
+    ChartMaConfig,
     UniverseResponse,
     RefreshFailure as RefreshFailureModel,
     RefreshResponse,
 )
+from app.strategy.schema import LowVolumePullbackParamsModel
 
 
 class BarsRepository:
@@ -104,6 +110,79 @@ class BarsRepository:
             bars = bars[-limit:]
         return BarsResponse(ticker=ticker, timeframe=timeframe, bars=bars)
 
+    def get_bars_with_indicators(
+        self,
+        ticker: str,
+        timeframe: str,
+        limit: int | None,
+        ma_fast: int | None,
+        ma_slow: int | None,
+        ma_long: int | None,
+    ) -> BarsIndicatorsResponse:
+        self._validate_limit(limit)
+        if timeframe not in {tf.name for tf in self._timeframes}:
+            raise ApiError(
+                status_code=404,
+                error="not_found",
+                message="timeframe not found",
+                details={"timeframe": timeframe},
+            )
+        if ticker not in self._tickers:
+            raise ApiError(
+                status_code=404,
+                error="not_found",
+                message="ticker not found",
+                details={"ticker": ticker},
+            )
+
+        defaults = LowVolumePullbackParamsModel()
+        fast = defaults.fastMA if ma_fast is None else ma_fast
+        slow = defaults.slowMA if ma_slow is None else ma_slow
+        long = defaults.longMA if ma_long is None else ma_long
+        _validate_ma_window("maFast", fast)
+        _validate_ma_window("maSlow", slow)
+        _validate_ma_window("maLong", long)
+
+        bars = self._cache.get_bars(ticker, timeframe)
+        if not bars:
+            return BarsIndicatorsResponse(
+                ticker=ticker,
+                timeframe=timeframe,
+                ma=ChartMaConfig(fast=fast, slow=slow, long=long),
+                bars=[],
+            )
+
+        closes = [bar.get("c") for bar in bars]
+        ma_fast_series = _compute_sma_series(closes, fast)
+        ma_slow_series = _compute_sma_series(closes, slow)
+        ma_long_series = _compute_sma_series(closes, long)
+
+        start = max(0, len(bars) - limit) if limit is not None else 0
+        result_bars: list[ChartBarPayload] = []
+        for idx in range(start, len(bars)):
+            bar = bars[idx]
+            result_bars.append(
+                ChartBarPayload(
+                    time=bar.get("time"),
+                    t=int(bar.get("t") or 0),
+                    o=float(bar.get("o") or 0.0),
+                    h=float(bar.get("h") or 0.0),
+                    l=float(bar.get("l") or 0.0),
+                    c=float(bar.get("c") or 0.0),
+                    v=float(bar.get("v") or 0.0),
+                    maFast=ma_fast_series[idx],
+                    maSlow=ma_slow_series[idx],
+                    maLong=ma_long_series[idx],
+                )
+            )
+
+        return BarsIndicatorsResponse(
+            ticker=ticker,
+            timeframe=timeframe,
+            ma=ChartMaConfig(fast=fast, slow=slow, long=long),
+            bars=result_bars,
+        )
+
     def get_bars_batch(
         self, tickers: Iterable[str], timeframe: str, limit: int | None
     ) -> BarsBatchResponse:
@@ -146,3 +225,35 @@ _repository = BarsRepository(
 
 def get_repository() -> BarsRepository:
     return _repository
+
+
+def _validate_ma_window(name: str, value: int) -> None:
+    if value < 1:
+        raise ApiError(
+            status_code=400,
+            error="invalid_request",
+            message=f"{name} must be >= 1.",
+            details={name: value},
+        )
+
+
+def _compute_sma_series(values: list[float | None], window: int) -> list[float | None]:
+    if window <= 0:
+        return [None for _ in values]
+    output: list[float | None] = [None] * len(values)
+    running = 0.0
+    queue: deque[float] = deque()
+    for idx, value in enumerate(values):
+        if not isinstance(value, (int, float)):
+            running = 0.0
+            queue.clear()
+            output[idx] = None
+            continue
+        val = float(value)
+        running += val
+        queue.append(val)
+        if len(queue) > window:
+            running -= queue.popleft()
+        if len(queue) == window:
+            output[idx] = running / window
+    return output

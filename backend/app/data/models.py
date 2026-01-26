@@ -29,6 +29,25 @@ class BarsResponse(BaseModel):
     bars: list[BarPayload]
 
 
+class ChartMaConfig(BaseModel):
+    fast: int
+    slow: int
+    long: int
+
+
+class ChartBarPayload(BarPayload):
+    maFast: float | None = None
+    maSlow: float | None = None
+    maLong: float | None = None
+
+
+class BarsIndicatorsResponse(BaseModel):
+    ticker: str
+    timeframe: str
+    ma: ChartMaConfig
+    bars: list[ChartBarPayload]
+
+
 class BarsBatchRequest(BaseModel):
     tickers: list[str]
     timeframe: str
