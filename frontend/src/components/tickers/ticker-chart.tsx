@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AreaSeries,
   CandlestickSeries,
   ColorType,
   CrosshairMode,
@@ -339,11 +340,18 @@ function normalizeColor(value: string): string | null {
   return null;
 }
 
+function toRgba(color: string, alpha: number, fallback: string) {
+  const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) return fallback;
+  const [, r, g, b] = match;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export function TickerChartView({ data, chartType, indicators, onHover, onReady }: ChartViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const lineSeriesRef = useRef<ISeriesApi<"Area"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const maFastSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const maSlowSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -413,6 +421,7 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     const upColor = resolveColor("--chart-1", "#22c55e");
     const downColor = resolveColor("--destructive", "#ef4444");
     const lineColor = resolveColor("--primary", "#0ea5e9");
+    const isDark = document.documentElement.classList.contains("dark");
     const gridColor = resolveColor("--border", "#e5e7eb");
     const textColor = resolveColor("--muted-foreground", "#6b7280");
     const maFastColor = resolveColor("--chart-2", "#f59e0b");
@@ -462,9 +471,11 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
       wickDownColor: downColor,
       borderVisible: false,
     });
-    const lineSeries = chart.addSeries(LineSeries, {
-      color: lineColor,
+    const lineSeries = chart.addSeries(AreaSeries, {
+      lineColor,
       lineWidth: 2,
+      topColor: toRgba(lineColor, isDark ? 0.45 : 0.25, "rgba(14, 165, 233, 0.25)"),
+      bottomColor: toRgba(lineColor, isDark ? 0.08 : 0.02, "rgba(14, 165, 233, 0.02)"),
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceScaleId: "volume",
