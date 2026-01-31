@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_BASE } from "@/lib/api";
 import { useI18n } from "@/components/providers/i18n-provider";
-import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
+import { fetchUniverse, type UniverseResponse } from "@/lib/api/universe";
 import { parseBacktestSearchParams, preferredTimeframe, type BacktestParams } from "./params";
 
 type BacktestResult = {

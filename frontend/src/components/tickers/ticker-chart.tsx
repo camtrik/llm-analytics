@@ -25,7 +25,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
-import { fetchTickerIndicators, type BarsIndicatorsResponse, type ChartBar } from "@/lib/ticker-chart";
+import { fetchTickerIndicators, type BarsIndicatorsResponse, type ChartBar } from "@/lib/api/bars";
 import { formatTimeframeLabel, sortTimeframes } from "@/lib/timeframe";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +51,6 @@ export type TickerChartSectionProps = {
   symbol: string;
   timeframes: string[];
   defaultTimeframe?: string;
-  limit?: number;
   className?: string;
 };
 
@@ -59,7 +58,6 @@ export function TickerChartSection({
   symbol,
   timeframes,
   defaultTimeframe,
-  limit = 300,
   className,
 }: TickerChartSectionProps) {
   const { t, locale } = useI18n();
@@ -81,8 +79,8 @@ export function TickerChartSection({
   }, [activeTimeframe]);
 
   const { data, isLoading, isFetching, isError, error } = useQuery<BarsIndicatorsResponse>({
-    queryKey: ["ticker-chart", symbol, activeTimeframe, limit],
-    queryFn: () => fetchTickerIndicators({ ticker: symbol, timeframe: activeTimeframe, limit }),
+    queryKey: ["ticker-chart", symbol, activeTimeframe],
+    queryFn: () => fetchTickerIndicators({ ticker: symbol, timeframe: activeTimeframe }),
     placeholderData: (previous) => previous,
   });
 

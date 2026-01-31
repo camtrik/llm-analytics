@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { TickerChartSectionClient } from "@/components/tickers/ticker-chart-section.client";
 import { Button } from "@/components/ui/button";
 import { addLocaleToPath } from "@/i18n/locale-path";
-import { fetchUniverse } from "@/lib/universe";
+import { fetchUniverse } from "@/lib/api/universe";
 import enMessages from "@/messages/en.json";
 import zhMessages from "@/messages/zh.json";
 

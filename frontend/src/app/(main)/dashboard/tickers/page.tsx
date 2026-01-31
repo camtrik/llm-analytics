@@ -13,7 +13,7 @@ import { addLocaleToPath } from "@/i18n/locale-path";
 import { getRequestLocale } from "@/i18n/server-locale";
 import enMessages from "@/messages/en.json";
 import zhMessages from "@/messages/zh.json";
-import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
+import { fetchUniverse, type UniverseResponse } from "@/lib/api/universe";
 
 const messagesMap = {
   en: enMessages,

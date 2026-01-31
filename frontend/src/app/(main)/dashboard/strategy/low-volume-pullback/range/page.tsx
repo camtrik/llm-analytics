@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { API_BASE } from "@/lib/api";
-import { fetchUniverse, type UniverseResponse } from "@/lib/universe";
+import { fetchUniverse, type UniverseResponse } from "@/lib/api/universe";
 import { parseRangeSearchParams, type RangeParams, preferredTimeframe } from "./params";
 
 type RangeSummary = {
