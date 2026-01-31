@@ -417,8 +417,25 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
         vertLines: { visible: false },
         horzLines: { visible: false },
       },
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: false,
+        horzTouchDrag: false,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: false,
+        mouseWheel: false,
+        pinch: false,
+      },
       rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false },
+      timeScale: {
+        borderVisible: false,
+        rightOffset: 0,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        lockVisibleTimeRangeOnResize: true,
+      },
       crosshair: { mode: CrosshairMode.Normal },
       localization: { priceFormatter: (price) => price.toFixed(2) },
     });
@@ -544,6 +561,7 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     maFastSeriesRef.current?.setData(maFastData);
     maSlowSeriesRef.current?.setData(maSlowData);
     maLongSeriesRef.current?.setData(maLongData);
+    chartRef.current?.timeScale().fitContent();
   }, [candleData, lineData, data, maFastData, maSlowData, maLongData]);
 
   useEffect(() => {
