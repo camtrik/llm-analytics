@@ -205,51 +205,64 @@ export function TickerChartSection({
             </div>
           )}
 
-          <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t("ticker.latestDate", "Latest Date")}</span>
-              <span className="font-medium">
-                {displayBar ? formatDate(displayBar.t, locale) : t("ticker.none", "No data")}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t("ticker.open", "Open")}</span>
-              <span className="font-medium">{formatNumber(displayBar?.o, locale, { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t("ticker.high", "High")}</span>
-              <span className="font-medium">{formatNumber(displayBar?.h, locale, { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t("ticker.low", "Low")}</span>
-              <span className="font-medium">{formatNumber(displayBar?.l, locale, { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t("ticker.close", "Close")}</span>
-              <span className="font-medium">{formatNumber(displayBar?.c, locale, { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t("ticker.volume", "Volume")}</span>
-              <span className="font-medium">{formatNumber(displayBar?.v, locale)}</span>
-            </div>
-            {indicatorState.maFast ? (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">{t("ticker.maFast", "MA Fast")}</span>
-                <span className="font-medium">{formatNumber(displayBar?.maFast, locale, { minimumFractionDigits: 2 })}</span>
+          <div className="space-y-3">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5">
+                <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.open", "Open")}</div>
+                <div className="text-base font-semibold tracking-tight">
+                  {formatNumber(displayBar?.o, locale, { minimumFractionDigits: 2 })}
+                </div>
               </div>
-            ) : null}
-            {indicatorState.maSlow ? (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">{t("ticker.maSlow", "MA Slow")}</span>
-                <span className="font-medium">{formatNumber(displayBar?.maSlow, locale, { minimumFractionDigits: 2 })}</span>
+              <div className="space-y-1.5">
+                <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.high", "High")}</div>
+                <div className="text-base font-semibold tracking-tight">
+                  {formatNumber(displayBar?.h, locale, { minimumFractionDigits: 2 })}
+                </div>
               </div>
-            ) : null}
-            {indicatorState.maLong ? (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">{t("ticker.maLong", "MA Long")}</span>
-                <span className="font-medium">{formatNumber(displayBar?.maLong, locale, { minimumFractionDigits: 2 })}</span>
+              <div className="space-y-1.5">
+                <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.low", "Low")}</div>
+                <div className="text-base font-semibold tracking-tight">
+                  {formatNumber(displayBar?.l, locale, { minimumFractionDigits: 2 })}
+                </div>
               </div>
-            ) : null}
+              <div className="space-y-1.5">
+                <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.close", "Close")}</div>
+                <div className="text-base font-semibold tracking-tight">
+                  {formatNumber(displayBar?.c, locale, { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5">
+                <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.volume", "Volume")}</div>
+                <div className="text-base font-semibold tracking-tight">{formatNumber(displayBar?.v, locale)}</div>
+              </div>
+              {indicatorState.maFast ? (
+                <div className="space-y-1.5">
+                  <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.maFast", "MA Fast")}</div>
+                  <div className="text-base font-semibold tracking-tight">
+                    {formatNumber(displayBar?.maFast, locale, { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              ) : null}
+              {indicatorState.maSlow ? (
+                <div className="space-y-1.5">
+                  <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.maSlow", "MA Slow")}</div>
+                  <div className="text-base font-semibold tracking-tight">
+                    {formatNumber(displayBar?.maSlow, locale, { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              ) : null}
+              {indicatorState.maLong ? (
+                <div className="space-y-1.5">
+                  <div className="text-muted-foreground text-xs tracking-wide">{t("ticker.maLong", "MA Long")}</div>
+                  <div className="text-base font-semibold tracking-tight">
+                    {formatNumber(displayBar?.maLong, locale, { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         </CardContent>
       </Card>
