@@ -32,7 +32,7 @@ export function TickerChartSectionClient(props: TickerChartSectionProps) {
 function TickerChartSectionSkeleton() {
   return (
     <>
-      <Card className="lg:col-span-2">
+      <Card className="lg:col-span-2 border-0 bg-transparent shadow-none">
         <CardHeader className="pb-3">
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-4 w-32" />

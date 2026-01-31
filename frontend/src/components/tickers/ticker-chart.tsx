@@ -109,7 +109,7 @@ export function TickerChartSection({
 
   return (
     <>
-      <Card className={cn("lg:col-span-2", className)}>
+      <Card className={cn("lg:col-span-2 border-0 bg-transparent shadow-none", className)}>
         <CardHeader className="space-y-3 pb-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
