@@ -312,39 +312,9 @@ type ChartViewProps = {
   onReady?: (api: { fitContent: () => void }) => void;
 };
 
-function resolveColor(variable: string, fallback: string) {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
-  if (!raw) return fallback;
-  const normalized = normalizeColor(raw);
-  if (normalized) return normalized;
-  const normalizedHsl = normalizeColor(`hsl(${raw})`);
-  return normalizedHsl ?? fallback;
-}
-
-function normalizeColor(value: string): string | null {
-  if (!value) return null;
-  const el = document.createElement("span");
-  el.style.color = value;
-  if (!el.style.color) return null;
-  document.body.appendChild(el);
-  const computed = getComputedStyle(el).color;
-  el.remove();
-  if (!computed) return null;
-  const lowered = computed.toLowerCase();
-  if (lowered.startsWith("lab(") || lowered.startsWith("oklab(") || lowered.startsWith("lch(") || lowered.startsWith("oklch(")) {
-    return null;
-  }
-  if (lowered.startsWith("rgb") || lowered.startsWith("hsl") || lowered.startsWith("#")) {
-    return computed;
-  }
-  return null;
-}
-
-function toRgba(color: string, alpha: number, fallback: string) {
-  const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-  if (!match) return fallback;
-  const [, r, g, b] = match;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function readCssVar(name: string, fallback: string) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
 }
 
 export function TickerChartView({ data, chartType, indicators, onHover, onReady }: ChartViewProps) {
@@ -418,15 +388,16 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const upColor = resolveColor("--chart-1", "#22c55e");
-    const downColor = resolveColor("--destructive", "#ef4444");
-    const lineColor = resolveColor("--primary", "#0ea5e9");
-    const isDark = document.documentElement.classList.contains("dark");
-    const gridColor = resolveColor("--border", "#e5e7eb");
-    const textColor = resolveColor("--muted-foreground", "#6b7280");
-    const maFastColor = resolveColor("--chart-2", "#f59e0b");
-    const maSlowColor = resolveColor("--chart-3", "#8b5cf6");
-    const maLongColor = resolveColor("--chart-4", "#10b981");
+    const upColor = readCssVar("--chart-up", "#22c55e");
+    const downColor = readCssVar("--chart-down", "#ef4444");
+    const lineColor = readCssVar("--chart-line", "#0ea5e9");
+    const lineTop = readCssVar("--chart-line-top", "rgba(14, 165, 233, 0.25)");
+    const lineBottom = readCssVar("--chart-line-bottom", "rgba(14, 165, 233, 0.02)");
+    const gridColor = readCssVar("--chart-grid", "rgba(148, 163, 184, 0.25)");
+    const textColor = readCssVar("--chart-text", "#64748b");
+    const maFastColor = readCssVar("--chart-ma-fast", "#f59e0b");
+    const maSlowColor = readCssVar("--chart-ma-slow", "#8b5cf6");
+    const maLongColor = readCssVar("--chart-ma-long", "#10b981");
 
     paletteRef.current = { up: upColor, down: downColor };
 
@@ -474,8 +445,8 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     const lineSeries = chart.addSeries(AreaSeries, {
       lineColor,
       lineWidth: 2,
-      topColor: toRgba(lineColor, isDark ? 0.45 : 0.25, "rgba(14, 165, 233, 0.25)"),
-      bottomColor: toRgba(lineColor, isDark ? 0.08 : 0.02, "rgba(14, 165, 233, 0.02)"),
+      topColor: lineTop,
+      bottomColor: lineBottom,
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceScaleId: "volume",
