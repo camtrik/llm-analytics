@@ -414,8 +414,8 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
         textColor,
       },
       grid: {
-        vertLines: { color: gridColor },
-        horzLines: { color: gridColor },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false },
