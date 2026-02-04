@@ -71,7 +71,6 @@ export function TickerChartSection({
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [indicatorKeys, setIndicatorKeys] = useState<IndicatorKey[]>(["maFast", "maSlow", "maLong"]);
   const [hoverData, setHoverData] = useState<HoverPayload | null>(null);
-  const chartApiRef = useRef<{ fitContent: () => void } | null>(null);
 
   const activeTimeframe = timeframes.includes(timeframe) ? timeframe : initialTimeframe;
 
@@ -96,17 +95,9 @@ export function TickerChartSection({
 
   const bars = data?.bars ?? [];
   const latest = bars.at(-1);
-  const prev = bars.at(-2);
-  const change = latest && prev ? ((latest.c - prev.c) / prev.c) * 100 : null;
+  const first = bars.at(0);
+  const change = latest && first ? ((latest.c - first.c) / first.c) * 100 : null;
   const displayBar = hoverData ?? latest;
-
-  const handleReset = useCallback(() => {
-    chartApiRef.current?.fitContent();
-  }, []);
-
-  const chartReady = useCallback((api: { fitContent: () => void }) => {
-    chartApiRef.current = api;
-  }, []);
 
   return (
     <>
@@ -127,9 +118,6 @@ export function TickerChartSection({
                   {formatPercent(change / 100, locale)}
                 </Badge>
               )}
-              <Button variant="outline" size="sm" onClick={handleReset}>
-                {t("ticker.resetView", "Reset view")}
-              </Button>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -198,7 +186,6 @@ export function TickerChartSection({
               chartType={chartType}
               indicators={indicatorState}
               onHover={setHoverData}
-              onReady={chartReady}
             />
           ) : (
             <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">
@@ -309,15 +296,43 @@ type ChartViewProps = {
   chartType: ChartType;
   indicators: IndicatorState;
   onHover?: (payload: HoverPayload | null) => void;
-  onReady?: (api: { fitContent: () => void }) => void;
 };
 
-function readCssVar(name: string, fallback: string) {
+function readCssVar(name: string) {
+  const fallback = "rgba(0, 0, 0, 1)";
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return value || fallback;
 }
 
-export function TickerChartView({ data, chartType, indicators, onHover, onReady }: ChartViewProps) {
+type ChartTheme = {
+  up: string;
+  down: string;
+  line: string;
+  lineTop: string;
+  lineBottom: string;
+  grid: string;
+  text: string;
+  maFast: string;
+  maSlow: string;
+  maLong: string;
+};
+
+function readChartTheme(): ChartTheme {
+  return {
+    up: readCssVar("--chart-up"),
+    down: readCssVar("--chart-down"),
+    line: readCssVar("--chart-line"),
+    lineTop: readCssVar("--chart-line-top"),
+    lineBottom: readCssVar("--chart-line-bottom"),
+    grid: readCssVar("--chart-grid"),
+    text: readCssVar("--chart-text"),
+    maFast: readCssVar("--chart-ma-fast"),
+    maSlow: readCssVar("--chart-ma-slow"),
+    maLong: readCssVar("--chart-ma-long"),
+  };
+}
+
+function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -389,23 +404,14 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const upColor = readCssVar("--chart-up", "#22c55e");
-    const downColor = readCssVar("--chart-down", "#ef4444");
-    const lineColor = readCssVar("--chart-line", "#0ea5e9");
-    const lineTop = readCssVar("--chart-line-top", "rgba(14, 165, 233, 0.25)");
-    const lineBottom = readCssVar("--chart-line-bottom", "rgba(14, 165, 233, 0.02)");
-    const gridColor = readCssVar("--chart-grid", "rgba(148, 163, 184, 0.25)");
-    const textColor = readCssVar("--chart-text", "#64748b");
-    const maFastColor = readCssVar("--chart-ma-fast", "#f59e0b");
-    const maSlowColor = readCssVar("--chart-ma-slow", "#8b5cf6");
-    const maLongColor = readCssVar("--chart-ma-long", "#10b981");
+    const theme = readChartTheme();
 
-    paletteRef.current = { up: upColor, down: downColor };
+    paletteRef.current = { up: theme.up, down: theme.down };
 
     const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor,
+        textColor: theme.text,
       },
       grid: {
         vertLines: { visible: false },
@@ -437,22 +443,22 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     chartRef.current = chart;
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor,
-      downColor,
-      wickUpColor: upColor,
-      wickDownColor: downColor,
+      upColor: theme.up,
+      downColor: theme.down,
+      wickUpColor: theme.up,
+      wickDownColor: theme.down,
       borderVisible: false,
     });
     const lineSeries = chart.addSeries(AreaSeries, {
-      lineColor,
+      lineColor: theme.line,
       lineWidth: 2,
-      topColor: lineTop,
-      bottomColor: lineBottom,
+      topColor: theme.lineTop,
+      bottomColor: theme.lineBottom,
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceScaleId: "volume",
       priceFormat: { type: "volume" },
-      color: upColor,
+      color: theme.up,
     });
 
     chart.priceScale("volume").applyOptions({
@@ -460,19 +466,19 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     });
 
     const maFastSeries = chart.addSeries(LineSeries, {
-      color: maFastColor,
+      color: theme.maFast,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
     });
     const maSlowSeries = chart.addSeries(LineSeries, {
-      color: maSlowColor,
+      color: theme.maSlow,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
     });
     const maLongSeries = chart.addSeries(LineSeries, {
-      color: maLongColor,
+      color: theme.maLong,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -485,53 +491,46 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     maSlowSeriesRef.current = maSlowSeries;
     maLongSeriesRef.current = maLongSeries;
 
-    applyColorsRef.current = () => {
-      const nextUp = readCssVar("--chart-up", "#22c55e");
-      const nextDown = readCssVar("--chart-down", "#ef4444");
-      const nextLine = readCssVar("--chart-line", "#0ea5e9");
-      const nextTop = readCssVar("--chart-line-top", "rgba(14, 165, 233, 0.25)");
-      const nextBottom = readCssVar("--chart-line-bottom", "rgba(14, 165, 233, 0.02)");
-      const nextGrid = readCssVar("--chart-grid", "rgba(148, 163, 184, 0.25)");
-      const nextText = readCssVar("--chart-text", "#64748b");
-      const nextMaFast = readCssVar("--chart-ma-fast", "#f59e0b");
-      const nextMaSlow = readCssVar("--chart-ma-slow", "#8b5cf6");
-      const nextMaLong = readCssVar("--chart-ma-long", "#10b981");
-
-      paletteRef.current = { up: nextUp, down: nextDown };
+    const applyTheme = (next: ChartTheme) => {
+      paletteRef.current = { up: next.up, down: next.down };
 
       chart.applyOptions({
         layout: {
           background: { type: ColorType.Solid, color: "transparent" },
-          textColor: nextText,
+          textColor: next.text,
         },
         grid: {
-          vertLines: { visible: false, color: nextGrid },
-          horzLines: { visible: false, color: nextGrid },
+          vertLines: { visible: false, color: next.grid },
+          horzLines: { visible: false, color: next.grid },
         },
       });
 
       candleSeries.applyOptions({
-        upColor: nextUp,
-        downColor: nextDown,
-        wickUpColor: nextUp,
-        wickDownColor: nextDown,
+        upColor: next.up,
+        downColor: next.down,
+        wickUpColor: next.up,
+        wickDownColor: next.down,
       });
       lineSeries.applyOptions({
-        lineColor: nextLine,
-        topColor: nextTop,
-        bottomColor: nextBottom,
+        lineColor: next.line,
+        topColor: next.lineTop,
+        bottomColor: next.lineBottom,
       });
-      volumeSeries.applyOptions({ color: nextUp });
-      maFastSeries.applyOptions({ color: nextMaFast });
-      maSlowSeries.applyOptions({ color: nextMaSlow });
-      maLongSeries.applyOptions({ color: nextMaLong });
+      volumeSeries.applyOptions({ color: next.up });
+      maFastSeries.applyOptions({ color: next.maFast });
+      maSlowSeries.applyOptions({ color: next.maSlow });
+      maLongSeries.applyOptions({ color: next.maLong });
 
       const volumeData: HistogramData[] = data.map((bar) => ({
         time: bar.t as UTCTimestamp,
         value: bar.v,
-        color: bar.c >= bar.o ? nextUp : nextDown,
+        color: bar.c >= bar.o ? next.up : next.down,
       }));
       volumeSeries.setData(volumeData);
+    };
+
+    applyColorsRef.current = () => {
+      applyTheme(readChartTheme());
     };
 
     const scheduleHover = (payload: HoverPayload | null) => {
@@ -568,8 +567,6 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
 
     chart.subscribeCrosshairMove(handleCrosshair);
 
-    onReady?.({ fitContent: () => chart.timeScale().fitContent() });
-
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.contentRect.width && entry.contentRect.height) {
@@ -602,7 +599,7 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
         window.cancelAnimationFrame(hoverFrameRef.current);
       }
     };
-  }, [onReady]);
+  }, []);
 
   useEffect(() => {
     candleSeriesRef.current?.setData(candleData);
