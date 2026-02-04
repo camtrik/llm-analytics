@@ -81,6 +81,7 @@ These serve as the fallback; there is no separate default.css file. */
   --chart-line-bottom: rgba(11, 31, 106, 0.05);
   --chart-up: #22c55e;
   --chart-down: #ef4444;
+  --chart-volume: rgba(15, 23, 42, 0.35);
   --chart-grid: rgba(148, 163, 184, 0.25);
   --chart-text: #64748b;
   --chart-ma-fast: #f59e0b;
@@ -129,6 +130,7 @@ These serve as the fallback; there is no separate default.css file. */
   --chart-line-bottom: rgba(56, 189, 248, 0.08);
   --chart-up: #22c55e;
   --chart-down: #f87171;
+  --chart-volume: rgba(226, 232, 240, 0.5);
   --chart-grid: rgba(148, 163, 184, 0.15);
   --chart-text: #94a3b8;
   --chart-ma-fast: #fbbf24;

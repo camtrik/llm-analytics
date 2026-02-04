@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AreaSeries,
   CandlestickSeries,
@@ -310,6 +310,7 @@ type ChartTheme = {
   line: string;
   lineTop: string;
   lineBottom: string;
+  volume: string;
   grid: string;
   text: string;
   maFast: string;
@@ -324,6 +325,7 @@ function readChartTheme(): ChartTheme {
     line: readCssVar("--chart-line"),
     lineTop: readCssVar("--chart-line-top"),
     lineBottom: readCssVar("--chart-line-bottom"),
+    volume: readCssVar("--chart-volume"),
     grid: readCssVar("--chart-grid"),
     text: readCssVar("--chart-text"),
     maFast: readCssVar("--chart-ma-fast"),
@@ -345,7 +347,6 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
   const hoverFrameRef = useRef<number | null>(null);
   const hoverPendingRef = useRef<HoverPayload | null>(null);
   const barMapRef = useRef<Map<number, ChartBar>>(new Map());
-  const paletteRef = useRef<{ up: string; down: string }>({ up: "#22c55e", down: "#ef4444" });
   const applyColorsRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -406,8 +407,6 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
 
     const theme = readChartTheme();
 
-    paletteRef.current = { up: theme.up, down: theme.down };
-
     const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
@@ -458,7 +457,7 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceScaleId: "volume",
       priceFormat: { type: "volume" },
-      color: theme.up,
+      color: theme.volume,
     });
 
     chart.priceScale("volume").applyOptions({
@@ -492,8 +491,6 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
     maLongSeriesRef.current = maLongSeries;
 
     const applyTheme = (next: ChartTheme) => {
-      paletteRef.current = { up: next.up, down: next.down };
-
       chart.applyOptions({
         layout: {
           background: { type: ColorType.Solid, color: "transparent" },
@@ -516,17 +513,11 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
         topColor: next.lineTop,
         bottomColor: next.lineBottom,
       });
-      volumeSeries.applyOptions({ color: next.up });
+      volumeSeries.applyOptions({ color: next.volume });
       maFastSeries.applyOptions({ color: next.maFast });
       maSlowSeries.applyOptions({ color: next.maSlow });
       maLongSeries.applyOptions({ color: next.maLong });
 
-      const volumeData: HistogramData[] = data.map((bar) => ({
-        time: bar.t as UTCTimestamp,
-        value: bar.v,
-        color: bar.c >= bar.o ? next.up : next.down,
-      }));
-      volumeSeries.setData(volumeData);
     };
 
     applyColorsRef.current = () => {
@@ -604,11 +595,9 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
   useEffect(() => {
     candleSeriesRef.current?.setData(candleData);
     lineSeriesRef.current?.setData(lineData);
-    const palette = paletteRef.current;
     const volumeData: HistogramData[] = data.map((bar) => ({
       time: bar.t as UTCTimestamp,
       value: bar.v,
-      color: bar.c >= bar.o ? palette.up : palette.down,
     }));
     volumeSeriesRef.current?.setData(volumeData);
     maFastSeriesRef.current?.setData(maFastData);
