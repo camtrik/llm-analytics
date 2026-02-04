@@ -331,6 +331,7 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
   const hoverPendingRef = useRef<HoverPayload | null>(null);
   const barMapRef = useRef<Map<number, ChartBar>>(new Map());
   const paletteRef = useRef<{ up: string; down: string }>({ up: "#22c55e", down: "#ef4444" });
+  const applyColorsRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     hoverCallbackRef.current = onHover;
@@ -484,6 +485,55 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     maSlowSeriesRef.current = maSlowSeries;
     maLongSeriesRef.current = maLongSeries;
 
+    applyColorsRef.current = () => {
+      const nextUp = readCssVar("--chart-up", "#22c55e");
+      const nextDown = readCssVar("--chart-down", "#ef4444");
+      const nextLine = readCssVar("--chart-line", "#0ea5e9");
+      const nextTop = readCssVar("--chart-line-top", "rgba(14, 165, 233, 0.25)");
+      const nextBottom = readCssVar("--chart-line-bottom", "rgba(14, 165, 233, 0.02)");
+      const nextGrid = readCssVar("--chart-grid", "rgba(148, 163, 184, 0.25)");
+      const nextText = readCssVar("--chart-text", "#64748b");
+      const nextMaFast = readCssVar("--chart-ma-fast", "#f59e0b");
+      const nextMaSlow = readCssVar("--chart-ma-slow", "#8b5cf6");
+      const nextMaLong = readCssVar("--chart-ma-long", "#10b981");
+
+      paletteRef.current = { up: nextUp, down: nextDown };
+
+      chart.applyOptions({
+        layout: {
+          background: { type: ColorType.Solid, color: "transparent" },
+          textColor: nextText,
+        },
+        grid: {
+          vertLines: { visible: false, color: nextGrid },
+          horzLines: { visible: false, color: nextGrid },
+        },
+      });
+
+      candleSeries.applyOptions({
+        upColor: nextUp,
+        downColor: nextDown,
+        wickUpColor: nextUp,
+        wickDownColor: nextDown,
+      });
+      lineSeries.applyOptions({
+        lineColor: nextLine,
+        topColor: nextTop,
+        bottomColor: nextBottom,
+      });
+      volumeSeries.applyOptions({ color: nextUp });
+      maFastSeries.applyOptions({ color: nextMaFast });
+      maSlowSeries.applyOptions({ color: nextMaSlow });
+      maLongSeries.applyOptions({ color: nextMaLong });
+
+      const volumeData: HistogramData[] = data.map((bar) => ({
+        time: bar.t as UTCTimestamp,
+        value: bar.v,
+        color: bar.c >= bar.o ? nextUp : nextDown,
+      }));
+      volumeSeries.setData(volumeData);
+    };
+
     const scheduleHover = (payload: HoverPayload | null) => {
       hoverPendingRef.current = payload;
       if (hoverFrameRef.current !== null) return;
@@ -533,9 +583,20 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
 
     resizeObserver.observe(containerRef.current);
 
+    const observer = new MutationObserver(() => {
+      applyColorsRef.current?.();
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme-preset"],
+    });
+
+    applyColorsRef.current?.();
+
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshair);
       resizeObserver.disconnect();
+      observer.disconnect();
       chart.remove();
       if (hoverFrameRef.current !== null) {
         window.cancelAnimationFrame(hoverFrameRef.current);
@@ -557,6 +618,7 @@ export function TickerChartView({ data, chartType, indicators, onHover, onReady 
     maSlowSeriesRef.current?.setData(maSlowData);
     maLongSeriesRef.current?.setData(maLongData);
     chartRef.current?.timeScale().fitContent();
+    applyColorsRef.current?.();
   }, [candleData, lineData, data, maFastData, maSlowData, maLongData]);
 
   useEffect(() => {

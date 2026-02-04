@@ -76,9 +76,9 @@ These serve as the fallback; there is no separate default.css file. */
   --chart-3: oklch(0.546 0.245 262.881);
   --chart-4: oklch(0.488 0.243 264.376);
   --chart-5: oklch(0.424 0.199 265.638);
-  --chart-line: #0ea5e9;
-  --chart-line-top: rgba(14, 165, 233, 0.25);
-  --chart-line-bottom: rgba(14, 165, 233, 0.02);
+  --chart-line: #0b1f6a;
+  --chart-line-top: rgba(11, 31, 106, 0.3);
+  --chart-line-bottom: rgba(11, 31, 106, 0.05);
   --chart-up: #22c55e;
   --chart-down: #ef4444;
   --chart-grid: rgba(148, 163, 184, 0.25);
