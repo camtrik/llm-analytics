@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Iterable
 
 from app.config.settings import load_settings
@@ -10,10 +11,10 @@ from app.config.data_config import (
     WATCHLIST_LABELS,
     WATCHLIST_TICKERS,
 )
+from app.config.indicators import get_default_ma_config
 from app.errors import ApiError
 from app.config.timeframes import Timeframe
 from app.data.market_cache import MarketCache
-from collections import deque
 
 from app.data.models import (
     BarsBatchResponse,
@@ -25,7 +26,6 @@ from app.data.models import (
     RefreshFailure as RefreshFailureModel,
     RefreshResponse,
 )
-from app.strategy.schema import LowVolumePullbackParamsModel
 
 
 class BarsRepository:
@@ -135,10 +135,10 @@ class BarsRepository:
                 details={"ticker": ticker},
             )
 
-        defaults = LowVolumePullbackParamsModel()
-        fast = defaults.fastMA if ma_fast is None else ma_fast
-        slow = defaults.slowMA if ma_slow is None else ma_slow
-        long = defaults.longMA if ma_long is None else ma_long
+        defaults = get_default_ma_config()
+        fast = defaults["fast"] if ma_fast is None else ma_fast
+        slow = defaults["slow"] if ma_slow is None else ma_slow
+        long = defaults["long"] if ma_long is None else ma_long
         _validate_ma_window("maFast", fast)
         _validate_ma_window("maSlow", slow)
         _validate_ma_window("maLong", long)
