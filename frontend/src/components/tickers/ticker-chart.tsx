@@ -334,6 +334,14 @@ function readChartTheme(): ChartTheme {
   };
 }
 
+function formatChartDate(time: UTCTimestamp) {
+  const date = new Date(time * 1000);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}/${month}/${day}`;
+}
+
 function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -436,7 +444,10 @@ function TickerChartView({ data, chartType, indicators, onHover }: ChartViewProp
         lockVisibleTimeRangeOnResize: true,
       },
       crosshair: { mode: CrosshairMode.Normal },
-      localization: { priceFormatter: (price) => price.toFixed(2) },
+      localization: {
+        priceFormatter: (price: number) => price.toFixed(2),
+        timeFormatter: (time: UTCTimestamp) => (formatChartDate(time)),
+      },
     });
 
     chartRef.current = chart;
