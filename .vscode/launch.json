@@ -3,11 +3,11 @@
   "configurations": [
     {
       "name": "Debug backend",
-      "type": "python",db
+      "type": "python",
       "request": "launch",
       "module": "uvicorn",
-      "cwd": "${workspaceFolder}/backend",
-      "env": { "PYTHONPATH": "${workspaceFolder}/backend" },
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
       "args": [
         "app.main:app",
         "--reload",

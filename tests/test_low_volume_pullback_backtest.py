@@ -7,12 +7,10 @@ import unittest
 
 import pandas as pd
 
-# Ensure backend/ is on path for app.* imports
-ROOT = Path(__file__).resolve().parents[2]
-BACKEND = ROOT / "backend"
-for path in (ROOT, BACKEND):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+# Ensure project root is on path for app.* imports
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.strategy.low_volume_pullback import (  # noqa: E402
     LowVolumePullbackParams,

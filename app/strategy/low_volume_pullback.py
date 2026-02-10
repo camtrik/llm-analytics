@@ -449,7 +449,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--list",
         type=str,
-        default="backend/app/config/files/nikkei225.yml",
+        default=str(Path(__file__).resolve().parents[1] / "config" / "files" / "nikkei225.yml"),
         help="YAML file with tickers list (tickers: [{symbol, name}]).",
     )
     parser.add_argument("--timeframe", type=str, default="6M_1d")

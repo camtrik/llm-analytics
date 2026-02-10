@@ -7,11 +7,9 @@ import unittest
 import sys
 
 # Ensure project root is on path for app.* imports
-ROOT = Path(__file__).resolve().parents[2]
-BACKEND = ROOT / "backend"
-for path in (ROOT, BACKEND):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import pandas as pd
 

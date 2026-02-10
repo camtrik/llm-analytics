@@ -2,7 +2,7 @@ low_volume_pullback:
   timeframe: "6M_1d"
 
   universe:
-    # Path is resolved relative to backend/app/config when not absolute.
+    # Path is resolved relative to app/config/files when not absolute.
     file: "nikkei225.yml"
 
   screener:
