@@ -7,3 +7,5 @@ AI-Trader
 ai-chatbot
 
 backend/app/config/files/config.yaml
+archive/
+./note.md
