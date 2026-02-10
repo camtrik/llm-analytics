@@ -5,3 +5,5 @@ var/
 keys.md
 AI-Trader
 ai-chatbot
+
+backend/app/config/files/config.yaml
