@@ -7,8 +7,12 @@ import yaml
 from app.config.timeframes import TIMEFRAME_COMBOS
 
 
+def _config_files_dir() -> Path:
+    return Path(__file__).resolve().parent / "files"
+
+
 def _load_tickers() -> dict[str, str]:
-    path = Path(__file__).with_name("watchlist.yaml")
+    path = _config_files_dir() / "watchlist.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     mapping: dict[str, str] = {}
     for item in data.get("tickers", []) or []:
@@ -20,7 +24,7 @@ def _load_tickers() -> dict[str, str]:
 
 
 def _load_nikkei225() -> dict[str, str]:
-    path = Path(__file__).with_name("nikkei225.yml")
+    path = _config_files_dir() / "nikkei225.yml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     mapping: dict[str, str] = {}
     for item in data.get("tickers", []) or []:

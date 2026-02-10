@@ -10,10 +10,10 @@ import yaml
 
 from app.config.settings import load_settings
 from app.config.timeframes import TIMEFRAME_COMBOS
+from app.config.strategy import get_low_volume_pullback_config
 from app.data.market_cache import MarketCache
 from app.errors import ApiError
 from app.quant.engine import _bars_to_df
-from app.strategy.strategy_config import get_low_volume_pullback_config
 
 
 @dataclass(frozen=True)
@@ -449,7 +449,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--list",
         type=str,
-        default="backend/app/config/nikkei225.yml",
+        default="backend/app/config/files/nikkei225.yml",
         help="YAML file with tickers list (tickers: [{symbol, name}]).",
     )
     parser.add_argument("--timeframe", type=str, default="6M_1d")

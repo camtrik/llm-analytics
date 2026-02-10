@@ -60,7 +60,7 @@ def _load_llm_settings(data: dict[str, object] | None) -> LlmSettings:
 
 def load_settings() -> Settings:
     repo_root = Path(__file__).resolve().parents[3]
-    default_config = Path(__file__).with_name("config.yaml")
+    default_config = Path(__file__).resolve().parent / "files" / "config.yaml"
     config_path = Path(os.getenv("SETTINGS_PATH", str(default_config)))
     if not config_path.exists():
         raise FileNotFoundError(f"Settings file not found: {config_path}")

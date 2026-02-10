@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config.settings import load_settings
+from app.config.strategy import get_low_volume_pullback_config, resolve_universe_file
 from app.config.timeframes import TIMEFRAME_COMBOS
 from app.data.market_cache import MarketCache
 from app.errors import ApiError
@@ -33,15 +34,13 @@ from app.strategy.schema import (
     LowVolumePullbackResponse,
     LowVolumePullbackResult,
 )
-from app.strategy.strategy_config import get_low_volume_pullback_config, resolve_universe_file
-
 _settings = load_settings()
 _cache = MarketCache(_settings.runtime_dir / "market_cache", TIMEFRAME_COMBOS)
 _timeframe_map = {tf.name: tf for tf in TIMEFRAME_COMBOS}
 
 
 def _fallback_universe_file() -> Path:
-    return Path(__file__).resolve().parents[1] / "config" / "nikkei225.yml"
+    return Path(__file__).resolve().parents[1] / "config" / "files" / "nikkei225.yml"
 
 
 def _universe_file_from_config() -> Path:

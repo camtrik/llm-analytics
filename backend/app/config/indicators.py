@@ -12,34 +12,42 @@ class DefaultMaConfig(TypedDict):
     slow: int
     long: int
 
-
-_FALLBACK_MA: DefaultMaConfig = {"fast": 5, "slow": 10, "long": 60}
-
-
 def _config_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
 def _indicators_config_path() -> Path:
-    return _config_dir() / "default-indicators.yaml"
+    return _config_dir() / "files" / "default-indicators.yaml"
 
 
 @lru_cache(maxsize=1)
 def load_default_indicators_config() -> dict[str, Any]:
     path = _indicators_config_path()
     if not path.exists():
-        return {}
+        raise RuntimeError(f"Missing indicators config: {path}")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Invalid indicators config format: {path}")
+    return data
 
 
 def get_default_ma_config() -> DefaultMaConfig:
-    raw = load_default_indicators_config().get("ma", {})
+    raw = load_default_indicators_config().get("ma")
     if not isinstance(raw, dict):
-        return dict(_FALLBACK_MA)
+        raise RuntimeError("default-indicators.yaml must contain a top-level 'ma' object")
+    missing = [key for key in ("fast", "slow", "long") if key not in raw]
+    if missing:
+        raise RuntimeError(f"default-indicators.yaml missing required ma keys: {', '.join(missing)}")
+    try:
+        fast = int(raw["fast"])
+        slow = int(raw["slow"])
+        long = int(raw["long"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("ma.fast/ma.slow/ma.long must be integers") from exc
+    if fast <= 0 or slow <= 0 or long <= 0:
+        raise RuntimeError("ma.fast/ma.slow/ma.long must be > 0")
     return {
-        "fast": int(raw.get("fast", _FALLBACK_MA["fast"])),
-        "slow": int(raw.get("slow", _FALLBACK_MA["slow"])),
-        "long": int(raw.get("long", _FALLBACK_MA["long"])),
+        "fast": fast,
+        "slow": slow,
+        "long": long,
     }
-
